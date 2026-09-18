@@ -47,6 +47,15 @@ html, body {
     transform: scale(var(--game-scale, 1));
 }
 
+.pixi-game-layer {
+    position: absolute;
+    inset: 0;
+    width: 480px;
+    height: 840px;
+    z-index: 2;
+    pointer-events: none;
+}
+
 .hud {
   position: absolute; top: 0; left: 0; right: 0;
   display: flex; justify-content: space-between; align-items: flex-start;
