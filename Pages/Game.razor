@@ -46,7 +46,10 @@
 
     @foreach (var b in bullets)
     {
-        <span @key="b.Id" class="bullet @(b.IsFlame ? "flame" : "player")" style="left:@Px(b.X); top:@Px(b.Y);"></span>
+        <span @key="b.Id"
+              class="bullet @(b.IsFlame ? "flame" : "player")"
+              style="transform:translate3d(@Px(b.X), @Px(b.Y), 0) translate(-50%, -50%);">
+        </span>
     }
     @foreach (var b in enemyBullets)
     {
@@ -72,7 +75,10 @@
 
     @foreach (var en in enemies)
     {
-        <div @key="en.Id" class="enemy-wrap @(en.Type == EnemyType.Boss ? "boss-wrap" : "")" style="left:@Px(en.X); top:@Px(en.Y);">            @if (en.Type == EnemyType.Thief && (en.State == EnemyState.Descending || en.State == EnemyState.Beaming) && en.TargetItemId != null)
+            <div @key="en.Id"
+                 class="enemy-wrap @(en.Type == EnemyType.Boss ? "boss-wrap" : "")"
+                 style="transform:translate3d(@Px(en.X), @Px(en.Y), 0) translate(-50%, -50%);">            
+                 @if (en.Type == EnemyType.Thief && (en.State == EnemyState.Descending || en.State == EnemyState.Beaming) && en.TargetItemId != null)
             {
                 <div class="target-badge"><img src="@Sprites.ForItem(en.TargetItemId)" class="sprite-img" alt="" /></div>
             }
@@ -128,8 +134,16 @@
         <div @key="c.Id" class="powerup" style="left:@Px(c.X); top:@Px(c.Y);"><img src="@Sprites.Coin" class="sprite-img" alt="" /></div>
     }
 
-    <div class="farmer @(shieldT > 0 ? "shielded" : "") @((invulnT > 0 && flashOn) ? "flash" : "") @(flameT > 0 ? "flame-mode" : "")"
-         style="left:@Px(farmerX); top:@Px(farmerY);"><img src="@(flameT > 0 ? Sprites.FarmerFlame : Sprites.Farmer)" class="sprite-img" alt="Ted" /></div>
+    <div class="farmer
+                @(shieldT > 0 ? "shielded" : "")
+                @((invulnT > 0 && flashOn) ? "flash" : "")
+                @(flameT > 0 ? "flame-mode" : "")"
+         style="transform:translate3d(@Px(farmerX), @Px(farmerY), 0) translate(-50%, -50%);">
+
+        <img src="@(flameT > 0 ? Sprites.FarmerFlame : Sprites.Farmer)"
+             class="sprite-img"
+             alt="Ted" />
+    </div>
 
     @if (hitFlashT > 0)
     {
@@ -411,19 +425,45 @@
     }
 
     async Task RunLoop(CancellationToken token)
-    {
-        var last = DateTime.UtcNow;
-        while (!token.IsCancellationRequested && screen == ScreenState.Playing)
-        {
-            var now = DateTime.UtcNow;
-            double dt = Math.Min((now - last).TotalMilliseconds, 40);
-            last = now;
+{
+    var last = DateTime.UtcNow;
+    double renderAccumulator = 0;
 
-            if (!paused) Update(dt);
-            await InvokeAsync(StateHasChanged);
-            await Task.Delay(20, token).ContinueWith(_ => { });
+    while (!token.IsCancellationRequested &&
+           screen == ScreenState.Playing)
+    {
+        var now = DateTime.UtcNow;
+
+        double dt = Math.Min(
+            (now - last).TotalMilliseconds,
+            40);
+
+        last = now;
+
+        if (!paused)
+        {
+            Update(dt);
+            renderAccumulator += dt;
+
+            // Render ~30 FPS instead of trying to redraw
+            // the entire Blazor component ~50 FPS.
+            if (renderAccumulator >= 33)
+            {
+                renderAccumulator = 0;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+
+        try
+        {
+            await Task.Delay(8, token);
+        }
+        catch (TaskCanceledException)
+        {
+            break;
         }
     }
+}
 
     // ---------------- core update ----------------
     void Update(double dt)
