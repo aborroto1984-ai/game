@@ -1,6 +1,7 @@
 @page "/"
 @using AlienFarmHeist.Models
 @using System.Globalization
+@using System.Diagnostics
 @inject IJSRuntime JS
 @implements IDisposable
 
@@ -8,6 +9,10 @@
      @onkeydown="OnKeyDown" @onkeydown:preventDefault
      @onkeyup="OnKeyUp"
      @onpointerdown="OnPointerMove" @onpointermove="OnPointerMove">
+
+    <canvas @ref="gameCanvas"
+            class="pixi-game-layer">
+    </canvas>
 
     <div class="hud">
         <div class="pill">⭐ @score</div>
@@ -44,18 +49,6 @@
         </div>
     }
 
-    @foreach (var b in bullets)
-    {
-        <span @key="b.Id"
-              class="bullet @(b.IsFlame ? "flame" : "player")"
-              style="transform:translate3d(@Px(b.X), @Px(b.Y), 0) translate(-50%, -50%);">
-        </span>
-    }
-    @foreach (var b in enemyBullets)
-    {
-        <span @key="b.Id" class="bullet enemy" style="left:@Px(b.X); top:@Px(b.Y);"></span>
-    }
-
     @foreach (var ex in explosions)
     {
         double prog = Math.Min(1, ex.Age / Explosion.Lifetime);
@@ -73,55 +66,38 @@
         </div>
     }
 
-    @foreach (var en in enemies)
+    @foreach (var en in enemies.Where(e =>
+        e.Type == EnemyType.Thief &&
+        e.State == EnemyState.Beaming &&
+        e.TargetItemId != null))
     {
-            <div @key="en.Id"
-                 class="enemy-wrap @(en.Type == EnemyType.Boss ? "boss-wrap" : "")"
-                 style="transform:translate3d(@Px(en.X), @Px(en.Y), 0) translate(-50%, -50%);">            
-                 @if (en.Type == EnemyType.Thief && (en.State == EnemyState.Descending || en.State == EnemyState.Beaming) && en.TargetItemId != null)
-            {
-                <div class="target-badge"><img src="@Sprites.ForItem(en.TargetItemId)" class="sprite-img" alt="" /></div>
-            }
-            @if (en.Type == EnemyType.Thief && en.State == EnemyState.Beaming)
-            {
-                <div class="beam-column" style="height:@Px(Math.Max(0, ItemFieldY - en.Y));">
-                    <img src="@Sprites.FxBeamColumn" class="sprite-img" alt="" />
-                </div>
-            }
-            else if ((en.Type == EnemyType.Fighter || en.Type == EnemyType.Elite) && en.State == EnemyState.Hovering)
-            {
-                <div class="attack-badge">⚡</div>
-            }
-            <div class="ufo-sprite @(en.Type.ToString().ToLowerInvariant())">
-                <img src="@(en.Type switch {
-                    EnemyType.Thief => Sprites.UfoThief,
-                    EnemyType.Elite => Sprites.UfoElite,
-                    EnemyType.Boss => Sprites.UfoBoss,
-                    _ => Sprites.UfoFighter,
-                })" class="sprite-img" alt="" />
-            </div>
-            @if (en.Type == EnemyType.Boss)
-            {
-                <div class="boss-hp-track"><div class="boss-hp-fill" style="width:@Num(100.0 * en.Hp / en.MaxHp)%;"></div></div>
-            }
-            else
-            {
-                <span class="hp @(en.Type == EnemyType.Thief ? "hp-thief" : en.Type == EnemyType.Elite ? "hp-elite" : "hp-fighter")">@en.Hp</span>
-            }
+        double beamProgress =
+        Math.Min(1, en.BeamElapsed / BeamDuration);
+
+        double eased =
+        beamProgress * beamProgress;
+
+        double riseY =
+        ItemFieldY -
+        (ItemFieldY - en.Y) * eased;
+
+        <div @key="@("beamfocus-" + en.Id)"
+             class="beam-focus"
+             style="left:@Px(en.X); top:@Px(riseY);">
+
+            <img src="@Sprites.FxBeamFocus"
+                 class="sprite-img"
+                 alt="" />
         </div>
 
-        @if (en.Type == EnemyType.Thief && en.State == EnemyState.Beaming && en.TargetItemId != null)
-        {
-            double beamProgress = Math.Min(1, en.BeamElapsed / BeamDuration);
-            double eased = beamProgress * beamProgress;
-            double riseY = ItemFieldY - (ItemFieldY - en.Y) * eased;
-            <div @key="@("beamfocus-" + en.Id)" class="beam-focus" style="left:@Px(en.X); top:@Px(riseY);">
-                <img src="@Sprites.FxBeamFocus" class="sprite-img" alt="" />
-            </div>
-            <div @key="@("rising-" + en.Id)" class="rising-item" style="left:@Px(en.X); top:@Px(riseY);">
-                <img src="@Sprites.ForItem(en.TargetItemId)" class="sprite-img" alt="" />
-            </div>
-        }
+        <div @key="@("rising-" + en.Id)"
+             class="rising-item"
+             style="left:@Px(en.X); top:@Px(riseY);">
+
+            <img src="@Sprites.ForItem(en.TargetItemId)"
+                 class="sprite-img"
+                 alt="" />
+        </div>
     }
 
     @foreach (var p in powerups)
@@ -133,17 +109,6 @@
     {
         <div @key="c.Id" class="powerup" style="left:@Px(c.X); top:@Px(c.Y);"><img src="@Sprites.Coin" class="sprite-img" alt="" /></div>
     }
-
-    <div class="farmer
-                @(shieldT > 0 ? "shielded" : "")
-                @((invulnT > 0 && flashOn) ? "flash" : "")
-                @(flameT > 0 ? "flame-mode" : "")"
-         style="transform:translate3d(@Px(farmerX), @Px(farmerY), 0) translate(-50%, -50%);">
-
-        <img src="@(flameT > 0 ? Sprites.FarmerFlame : Sprites.Farmer)"
-             class="sprite-img"
-             alt="Ted" />
-    </div>
 
     @if (hitFlashT > 0)
     {
@@ -238,6 +203,11 @@
     Random rng = new();
     CancellationTokenSource? loopCts;
     CancellationTokenSource? toastCts;
+
+    ElementReference gameCanvas;
+
+    Task? pixiInitTask;
+    bool pixiReady;
 
     ScreenState screen = ScreenState.Start;
     bool paused = false;
@@ -335,6 +305,49 @@
         _ = PlayMusic("music_intro.mp3");
     }
 
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            pixiInitTask = InitializePixiAsync();
+        }
+
+        return pixiInitTask ?? Task.CompletedTask;
+    }
+
+    async Task InitializePixiAsync()
+    {
+        var itemAssets = ItemDefs.ToDictionary(
+            x => x.Id,
+            x => Sprites.ForItem(x.Id));
+
+        await JS.InvokeVoidAsync(
+            "alienFarmPixi.init",
+            gameCanvas,
+            new
+            {
+                Width = W,
+                Height = H,
+                ItemFieldY,
+                Assets = new
+                {
+                    Farmer = Sprites.Farmer,
+                    FarmerFlame = Sprites.FarmerFlame,
+
+                    UfoFighter = Sprites.UfoFighter,
+                    UfoThief = Sprites.UfoThief,
+                    UfoElite = Sprites.UfoElite,
+                    UfoBoss = Sprites.UfoBoss,
+
+                    BeamColumn = Sprites.FxBeamColumn,
+
+                    Items = itemAssets
+                }
+            });
+
+        pixiReady = true;
+    }
+
     const double ItemFieldY = H * 0.76;
     const double BeamHoverY = H * 0.50;
     const double BeamDuration = 1300;
@@ -399,6 +412,10 @@
     // ---------------- lifecycle ----------------
     async Task StartGame()
     {
+        if (pixiInitTask != null)
+        {
+            await pixiInitTask;
+        }
         time = 0; difficulty = 1; score = 0; lives = 4 + Progress.LifeLevel;
         farmerX = W / 2; farmerTargetX = W / 2;
         keyLeft = keyRight = false;
@@ -416,6 +433,7 @@
         StateHasChanged();
         _ = PlayMusic(rng.Next(2) == 0 ? "music_gameplay_1.mp3" : "music_gameplay_2.mp3");
 
+        await PushPixiFrameAsync();
         loopCts?.Cancel();
         loopCts = new CancellationTokenSource();
         _ = RunLoop(loopCts.Token);
@@ -425,45 +443,61 @@
     }
 
     async Task RunLoop(CancellationToken token)
-{
-    var last = DateTime.UtcNow;
-    double renderAccumulator = 0;
-
-    while (!token.IsCancellationRequested &&
-           screen == ScreenState.Playing)
     {
-        var now = DateTime.UtcNow;
+        var clock = Stopwatch.StartNew();
 
-        double dt = Math.Min(
-            (now - last).TotalMilliseconds,
-            40);
+        double last = clock.Elapsed.TotalMilliseconds;
+        double blazorAccumulator = 0;
 
-        last = now;
+        const double FrameMs = 1000.0 / 60.0;
+        const double BlazorFrameMs = 1000.0 / 30.0;
 
-        if (!paused)
+        while (!token.IsCancellationRequested &&
+               screen == ScreenState.Playing)
         {
-            Update(dt);
-            renderAccumulator += dt;
+            double frameStart = clock.Elapsed.TotalMilliseconds;
 
-            // Render ~30 FPS instead of trying to redraw
-            // the entire Blazor component ~50 FPS.
-            if (renderAccumulator >= 33)
+            double dt = Math.Min(frameStart - last, 40);
+            last = frameStart;
+
+            if (!paused)
             {
-                renderAccumulator = 0;
-                await InvokeAsync(StateHasChanged);
+                // Game simulation now runs approximately 60 times/sec,
+                // not ~250 times/sec.
+                Update(dt);
+
+                // Pixi owns the moving gameplay objects.
+                await PushPixiFrameAsync();
+
+                // Blazor only needs occasional refreshes for the HUD,
+                // explosions, pickups, remaining beam effects, etc.
+                blazorAccumulator += dt;
+
+                if (blazorAccumulator >= BlazorFrameMs)
+                {
+                    blazorAccumulator %= BlazorFrameMs;
+
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+
+            double workTime =
+                clock.Elapsed.TotalMilliseconds - frameStart;
+
+            int delay = (int)Math.Max(
+                1,
+                FrameMs - workTime);
+
+            try
+            {
+                await Task.Delay(delay, token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
             }
         }
-
-        try
-        {
-            await Task.Delay(8, token);
-        }
-        catch (TaskCanceledException)
-        {
-            break;
-        }
     }
-}
 
     // ---------------- core update ----------------
     void Update(double dt)
@@ -1022,5 +1056,62 @@
         loopCts?.Cancel();
         toastCts?.Cancel();
         bannerCts?.Cancel();
+    }
+
+    async ValueTask PushPixiFrameAsync()
+    {
+        if (!pixiReady)
+            return;
+
+        var frame = new
+        {
+            Farmer = new
+            {
+                X = farmerX,
+                Y = farmerY,
+                Flame = flameT > 0,
+                Flash = invulnT > 0 && flashOn
+            },
+
+            Bullets = bullets
+                .Select(b => new
+                {
+                    b.Id,
+                    b.X,
+                    b.Y,
+                    b.IsFlame
+                })
+                .ToArray(),
+
+            EnemyBullets = enemyBullets
+                .Select(b => new
+                {
+                    b.Id,
+                    b.X,
+                    b.Y,
+                    IsFlame = false
+                })
+                .ToArray(),
+
+            Enemies = enemies
+                .Select(en => new
+                {
+                    en.Id,
+                    en.X,
+                    en.Y,
+                    en.Hp,
+                    en.MaxHp,
+
+                    Type = en.Type.ToString(),
+                    State = en.State.ToString(),
+
+                    en.TargetItemId
+                })
+                .ToArray()
+        };
+
+        await JS.InvokeVoidAsync(
+            "alienFarmPixi.sync",
+            frame);
     }
 }
