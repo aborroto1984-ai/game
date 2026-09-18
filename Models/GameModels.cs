@@ -15,6 +15,7 @@ public class FarmItem
 
 public class Bullet
 {
+    public Guid Id { get; } = Guid.NewGuid();
     public double X, Y, Vx, Vy;
     public bool IsFlame;
 }

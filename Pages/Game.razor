@@ -40,18 +40,17 @@
 
     @foreach (var it in items)
     {
-        <div class="field-item @(it.Safe ? (IsBeingBeamed(it.Id) ? "beaming" : "") : "stolen")" style="left:@Px(it.FieldX); top:@Px(ItemFieldY);">
-            <img src="@Sprites.ForItem(it.Id)" class="sprite-img" alt="" />
+        <div @key="it.Id" class="field-item @(it.Safe ? (IsBeingBeamed(it.Id) ? "beaming" : "") : "stolen")" style="left:@Px(it.FieldX); top:@Px(ItemFieldY);">            <img src="@Sprites.ForItem(it.Id)" class="sprite-img" alt="" />
         </div>
     }
 
     @foreach (var b in bullets)
     {
-        <span class="bullet @(b.IsFlame ? "flame" : "player")" style="left:@Px(b.X); top:@Px(b.Y);"></span>
+        <span @key="b.Id" class="bullet @(b.IsFlame ? "flame" : "player")" style="left:@Px(b.X); top:@Px(b.Y);"></span>
     }
     @foreach (var b in enemyBullets)
     {
-        <span class="bullet enemy" style="left:@Px(b.X); top:@Px(b.Y);"></span>
+        <span @key="b.Id" class="bullet enemy" style="left:@Px(b.X); top:@Px(b.Y);"></span>
     }
 
     @foreach (var ex in explosions)
@@ -66,15 +65,14 @@
             ExplosionSize.Medium => Sprites.FxMediumExplosion,
             _ => Sprites.FxLargeExplosion,
         };
-        <div class="explosion" style="left:@Px(ex.X); top:@Px(ex.Y); width:@Px(boxSize); height:@Px(boxSize); transform:translate(-50%,-50%) scale(@Num(scale)); opacity:@Num(opacity);">
+        <div @key="ex.Id" class="explosion" style="left:@Px(ex.X); top:@Px(ex.Y); width:@Px(boxSize); height:@Px(boxSize); transform:translate(-50%,-50%) scale(@Num(scale)); opacity:@Num(opacity);">
             <img src="@img" class="sprite-img" alt="" />
         </div>
     }
 
     @foreach (var en in enemies)
     {
-        <div class="enemy-wrap @(en.Type == EnemyType.Boss ? "boss-wrap" : "")" style="left:@Px(en.X); top:@Px(en.Y);">
-            @if (en.Type == EnemyType.Thief && (en.State == EnemyState.Descending || en.State == EnemyState.Beaming) && en.TargetItemId != null)
+        <div @key="en.Id" class="enemy-wrap @(en.Type == EnemyType.Boss ? "boss-wrap" : "")" style="left:@Px(en.X); top:@Px(en.Y);">            @if (en.Type == EnemyType.Thief && (en.State == EnemyState.Descending || en.State == EnemyState.Beaming) && en.TargetItemId != null)
             {
                 <div class="target-badge"><img src="@Sprites.ForItem(en.TargetItemId)" class="sprite-img" alt="" /></div>
             }
@@ -111,10 +109,10 @@
             double beamProgress = Math.Min(1, en.BeamElapsed / BeamDuration);
             double eased = beamProgress * beamProgress;
             double riseY = ItemFieldY - (ItemFieldY - en.Y) * eased;
-            <div class="beam-focus" style="left:@Px(en.X); top:@Px(riseY);">
+            <div @key="@("beamfocus-" + en.Id)" class="beam-focus" style="left:@Px(en.X); top:@Px(riseY);">
                 <img src="@Sprites.FxBeamFocus" class="sprite-img" alt="" />
             </div>
-            <div class="rising-item" style="left:@Px(en.X); top:@Px(riseY);">
+            <div @key="@("rising-" + en.Id)" class="rising-item" style="left:@Px(en.X); top:@Px(riseY);">
                 <img src="@Sprites.ForItem(en.TargetItemId)" class="sprite-img" alt="" />
             </div>
         }
@@ -122,12 +120,12 @@
 
     @foreach (var p in powerups)
     {
-        <div class="powerup" style="left:@Px(p.X); top:@Px(p.Y);"><img src="@Sprites.ForPower(p.Key)" class="sprite-img" alt="" /></div>
+        <div @key="p.Id" class="powerup" style="left:@Px(p.X); top:@Px(p.Y);"><img src="@Sprites.ForPower(p.Key)" class="sprite-img" alt="" /></div>
     }
 
     @foreach (var c in coinPickups)
     {
-        <div class="powerup" style="left:@Px(c.X); top:@Px(c.Y);"><img src="@Sprites.Coin" class="sprite-img" alt="" /></div>
+        <div @key="c.Id" class="powerup" style="left:@Px(c.X); top:@Px(c.Y);"><img src="@Sprites.Coin" class="sprite-img" alt="" /></div>
     }
 
     <div class="farmer @(shieldT > 0 ? "shielded" : "") @((invulnT > 0 && flashOn) ? "flash" : "") @(flameT > 0 ? "flame-mode" : "")"
