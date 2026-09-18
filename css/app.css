@@ -439,3 +439,17 @@ button.play:active { transform: translateY(4px); box-shadow: 0 1px 0 var(--barn-
   right: 0.75rem;
   top: 0.5rem;
 }
+
+/* drop-shadow filters get recomputed every frame on anything that moves,
+   which is cheap on desktop GPUs but a real cost on phones -- strip them
+   below the same breakpoint used for touch controls, desktop keeps the glow */
+@media (max-width: 700px) {
+    .ufo-sprite.thief,
+    .ufo-sprite.elite,
+    .ufo-sprite.boss,
+    .attack-badge,
+    .farmer.shielded,
+    .farmer.flame-mode {
+        filter: none;
+    }
+}
