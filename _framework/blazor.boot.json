@@ -1,7 +1,7 @@
 {
   "mainAssemblyName": "AlienFarmHeist",
   "resources": {
-    "hash": "sha256-O4AE0D66pByw1Bs1ncX39qMRnphQrlj87wnu0RYcknY=",
+    "hash": "sha256-8+Du5qN/5f8yFXGEthl1ex4lQ8BVzd86lD2wqxwTVHE=",
     "jsModuleNative": {
       "dotnet.native.js": "sha256-dexsp+9ih2C28zVhNnPXUbkz2QCq7lHpkyDcmaLl7NQ="
     },
@@ -45,7 +45,7 @@
       "System.Text.Json.wasm": "sha256-hd0swmXYVCqMFtCPU3a770M5/M1AyBUtiKV15BnbUKc=",
       "System.Text.RegularExpressions.wasm": "sha256-79rD56wmpNJvLcJQhHY1Cy5nfIFTEEwYf0QjBbSgNNE=",
       "System.Private.CoreLib.wasm": "sha256-vGwOyJEXYnCKMyb1kdjr0tr7HflqxhJNsDY+QOgvwvA=",
-      "AlienFarmHeist.wasm": "sha256-TvcO84W0kT6fTh9nEtmQLZTb0A+TlSK8YpSBpTjYPW0="
+      "AlienFarmHeist.wasm": "sha256-tk46dIVGoMLxpPZK8e1ycNI4Q4x9F6Oi8jG5Jk1zu90="
     }
   },
   "cacheBootResources": true,
