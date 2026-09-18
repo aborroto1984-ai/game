@@ -324,6 +324,13 @@
     const double BeamHoverY = H * 0.50;
     const double BeamDuration = 1300;
 
+    // safety valves so the DOM never has to track more moving elements than
+    // a phone can comfortably render at once, regardless of power-up stacking
+    const int MaxPlayerBullets = 50;
+    const int MaxEnemyBullets = 40;
+    const int MaxEnemies = 14;
+    const int MaxExplosions = 10;
+
     string Hearts() => lives > 0 ? string.Concat(Enumerable.Repeat("❤️", lives)) : "💀";
 
     bool IsBeingBeamed(string itemId) =>
@@ -413,7 +420,7 @@
 
             if (!paused) Update(dt);
             await InvokeAsync(StateHasChanged);
-            await Task.Delay(16, token).ContinueWith(_ => { });
+            await Task.Delay(20, token).ContinueWith(_ => { });
         }
     }
 
@@ -451,19 +458,22 @@
 
         // auto fire
         fireTimer -= dt;
-        if (flameT > 0)
+                if (flameT > 0)
         {
             // flamethrower: a fast, wide spray of short flame particles instead of aimed bullets
             if (fireTimer <= 0)
             {
                 fireTimer = 55;
-                double fy = farmerY - 18;
-                for (int s = 0; s < 2; s++)
+                if (bullets.Count < MaxPlayerBullets)
                 {
-                    double spread = (rng.NextDouble() - 0.5) * 0.32;
-                    bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = spread, Vy = -0.44 - rng.NextDouble() * 0.08, IsFlame = true });
+                    double fy = farmerY - 18;
+                    for (int s = 0; s < 2; s++)
+                    {
+                        double spread = (rng.NextDouble() - 0.5) * 0.32;
+                        bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = spread, Vy = -0.44 - rng.NextDouble() * 0.08, IsFlame = true });
+                    }
+                    _ = PlaySfx("sfx_bullet.mp3", 0.22);
                 }
-                _ = PlaySfx("sfx_bullet.mp3", 0.22);
             }
         }
         else
@@ -472,18 +482,21 @@
             if (fireTimer <= 0)
             {
                 fireTimer = rate;
-                double fy = farmerY - 18;
-                if (wideT > 0)
+                if (bullets.Count < MaxPlayerBullets)
                 {
-                    bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0, Vy = -0.42 });
-                    bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = -0.14, Vy = -0.4 });
-                    bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0.14, Vy = -0.4 });
+                    double fy = farmerY - 18;
+                    if (wideT > 0)
+                    {
+                        bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0, Vy = -0.42 });
+                        bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = -0.14, Vy = -0.4 });
+                        bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0.14, Vy = -0.4 });
+                    }
+                    else
+                    {
+                        bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0, Vy = -0.46 });
+                    }
+                    _ = PlaySfx("sfx_bullet.mp3", 0.35);
                 }
-                else
-                {
-                    bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0, Vy = -0.46 });
-                }
-                _ = PlaySfx("sfx_bullet.mp3", 0.35);
             }
         }
 
@@ -529,7 +542,8 @@
                         if (en.ShootTimer <= 0)
                         {
                             en.ShootTimer = (en.Type == EnemyType.Elite ? 1100 : 1600) + rng.NextDouble() * 900;
-                            enemyBullets.Add(new Bullet { X = en.X, Y = en.Y + 14, Vx = (farmerX - en.X) * 0.0007, Vy = 0.17 });
+                            if (enemyBullets.Count < MaxEnemyBullets)
+                                enemyBullets.Add(new Bullet { X = en.X, Y = en.Y + 14, Vx = (farmerX - en.X) * 0.0007, Vy = 0.17 });
                         }
                         if (en.HoverTimer <= 0)
                         {
@@ -564,8 +578,10 @@
                     if (en.ShootTimer <= 0)
                     {
                         en.ShootTimer = 1300 + rng.NextDouble() * 400;
-                        for (int s = -1; s <= 1; s++)
-                            enemyBullets.Add(new Bullet { X = en.X, Y = en.Y + 20, Vx = s * 0.10 + (farmerX - en.X) * 0.0004, Vy = 0.19 });
+                         if (enemyBullets.Count < MaxEnemyBullets)
+                            for (int s = -1; s <= 1; s++)
+                                enemyBullets.Add(new Bullet { X = en.X, Y = en.Y + 20, Vx = s * 0.10 + (farmerX - en.X) * 0.0004, Vy = 0.19 });
+                    
                     }
                 }
             }
@@ -735,6 +751,7 @@
 
     void SpawnEnemy()
     {
+        if (enemies.Count >= MaxEnemies) return;
         // an item already being chased by an active thief is off the table for any new thief --
         // this is what stops two ships from converging on the same target and one of them
         // "re-stealing" (actually stealing something else) once the first one finishes
@@ -812,6 +829,7 @@
 
     void SpawnExplosion(double x, double y, ExplosionSize size)
     {
+        if (explosions.Count >= MaxExplosions) return;
         explosions.Add(new Explosion { X = x, Y = y, Size = size });
         _ = PlaySfx(rng.Next(2) == 0 ? "sfx_explosion_1.wav" : "sfx_explosion_2.wav", size == ExplosionSize.Large ? 0.9 : 0.6);
     }
