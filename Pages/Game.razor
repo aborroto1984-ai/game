@@ -43,73 +43,6 @@
         </div>
     }
 
-    @foreach (var it in items)
-    {
-        <div @key="it.Id" class="field-item @(it.Safe ? (IsBeingBeamed(it.Id) ? "beaming" : "") : "stolen")" style="left:@Px(it.FieldX); top:@Px(ItemFieldY);">            <img src="@Sprites.ForItem(it.Id)" class="sprite-img" alt="" />
-        </div>
-    }
-
-    @foreach (var ex in explosions)
-    {
-        double prog = Math.Min(1, ex.Age / Explosion.Lifetime);
-        double scale = 0.4 + prog * 0.9;
-        double opacity = 1 - prog;
-        int boxSize = ex.Size switch { ExplosionSize.Small => 60, ExplosionSize.Medium => 100, _ => 160 };
-        string img = ex.Size switch
-        {
-            ExplosionSize.Small => Sprites.FxSmallExplosion,
-            ExplosionSize.Medium => Sprites.FxMediumExplosion,
-            _ => Sprites.FxLargeExplosion,
-        };
-        <div @key="ex.Id" class="explosion" style="left:@Px(ex.X); top:@Px(ex.Y); width:@Px(boxSize); height:@Px(boxSize); transform:translate(-50%,-50%) scale(@Num(scale)); opacity:@Num(opacity);">
-            <img src="@img" class="sprite-img" alt="" />
-        </div>
-    }
-
-    @foreach (var en in enemies.Where(e =>
-        e.Type == EnemyType.Thief &&
-        e.State == EnemyState.Beaming &&
-        e.TargetItemId != null))
-    {
-        double beamProgress =
-        Math.Min(1, en.BeamElapsed / BeamDuration);
-
-        double eased =
-        beamProgress * beamProgress;
-
-        double riseY =
-        ItemFieldY -
-        (ItemFieldY - en.Y) * eased;
-
-        <div @key="@("beamfocus-" + en.Id)"
-             class="beam-focus"
-             style="left:@Px(en.X); top:@Px(riseY);">
-
-            <img src="@Sprites.FxBeamFocus"
-                 class="sprite-img"
-                 alt="" />
-        </div>
-
-        <div @key="@("rising-" + en.Id)"
-             class="rising-item"
-             style="left:@Px(en.X); top:@Px(riseY);">
-
-            <img src="@Sprites.ForItem(en.TargetItemId)"
-                 class="sprite-img"
-                 alt="" />
-        </div>
-    }
-
-    @foreach (var p in powerups)
-    {
-        <div @key="p.Id" class="powerup" style="left:@Px(p.X); top:@Px(p.Y);"><img src="@Sprites.ForPower(p.Key)" class="sprite-img" alt="" /></div>
-    }
-
-    @foreach (var c in coinPickups)
-    {
-        <div @key="c.Id" class="powerup" style="left:@Px(c.X); top:@Px(c.Y);"><img src="@Sprites.Coin" class="sprite-img" alt="" /></div>
-    }
-
     @if (hitFlashT > 0)
     {
         <div class="hit-flash" style="opacity:@Num(Math.Min(0.35, hitFlashT / 220.0 * 0.35));"></div>
@@ -194,10 +127,8 @@
 </div>
 
 @code {
-    // ---- fixed logical playfield size (CSS pixels) ----
     const double W = 480;
     const double H = 840;
-
 
     ElementReference stageRef;
     Random rng = new();
@@ -277,24 +208,37 @@
     };
 
     List<Explosion> explosions = new();
-
     List<DecorPlant> decor = new();
 
     protected override async Task OnInitializedAsync()
     {
+        // 1. Initialize the items list first!
         items = ItemDefs.Select(d => new FarmItem { Id = d.Id, Name = d.Name, Safe = true }).ToList();
-        for (int i = 0; i < items.Count; i++)
-            items[i].FieldX = W * (i + 1) / (items.Count + 1);
 
-        // scatter a little cornfield and pumpkin patch around the actual stealable
-        // corn/pumpkin items, so it's visually obvious which crop an incoming thief is after
+        // 2. Map explicit X positions
+        var xPositions = new Dictionary<string, double>
+        {
+            ["cow"] = 50,
+            ["chicken"] = 110,
+            ["tractor"] = 180,
+            ["wife"] = 250,
+            ["truck"] = 320,
+            ["corn"] = 380,
+            ["pumpkin"] = 430,
+            
+        };
+
+        foreach (var item in items)
+        {
+            if (xPositions.TryGetValue(item.Id, out double customX))
+                item.FieldX = customX;
+        }
+
+        // 3. Position background decor relative to item positions
         double cornX = items.First(i => i.Id == "corn").FieldX;
         double pumpkinX = items.First(i => i.Id == "pumpkin").FieldX;
 
-        // a light dusting of cornstalks/pumpkin vines behind the actual corn/pumpkin
-        // items -- kept well inside each item's own slot width and pushed well above
-        // the item row (items moved further down the field), so it clearly reads as
-        // distant backdrop rather than something competing with the actual target
+        decor.Clear(); // Clear existing entries if restarting
         decor.Add(new() { Image = "images/corn_plant.png", X = cornX - 18, Y = ItemFieldY - 95, W = 22, H = 66 });
         decor.Add(new() { Image = "images/corn_plant.png", X = cornX + 19, Y = ItemFieldY - 88, W = 20, H = 60 });
 
@@ -320,6 +264,12 @@
         var itemAssets = ItemDefs.ToDictionary(
             x => x.Id,
             x => Sprites.ForItem(x.Id));
+
+        foreach (var p in PowerupDefs)
+        {
+            itemAssets[p.Key] = Sprites.ForPower(p.Key);
+        }
+        itemAssets["coin"] = Sprites.Coin;
 
         await JS.InvokeVoidAsync(
             "alienFarmPixi.init",
@@ -352,8 +302,6 @@
     const double BeamHoverY = H * 0.50;
     const double BeamDuration = 1300;
 
-    // safety valves so the DOM never has to track more moving elements than
-    // a phone can comfortably render at once, regardless of power-up stacking
     const int MaxPlayerBullets = 50;
     const int MaxEnemyBullets = 40;
     const int MaxEnemies = 14;
@@ -364,8 +312,6 @@
     bool IsBeingBeamed(string itemId) =>
         enemies.Any(e => e.Type == EnemyType.Thief && e.State == EnemyState.Beaming && e.TargetItemId == itemId);
 
-    // ---------------- audio ----------------
-    // Drop files into wwwroot/audio/ with these exact names -- nothing else to wire up.
     async Task PlayMusic(string file, double volume = 0.5)
     {
         try { await JS.InvokeVoidAsync("gameAudio.playMusic", $"audio/{file}", volume); } catch { }
@@ -377,12 +323,9 @@
         try { await JS.InvokeVoidAsync("gameAudio.playSfx", $"audio/{file}", volume); } catch { }
     }
 
-    // CSS values must always use '.' as the decimal separator, regardless
-    // of the browser's locale — these keep every style="" binding safe.
     static string Px(double v) => v.ToString(CultureInfo.InvariantCulture) + "px";
     static string Num(double v) => v.ToString(CultureInfo.InvariantCulture);
 
-    // ---------------- input ----------------
     void OnKeyDown(KeyboardEventArgs e)
     {
         if (e.Key is "ArrowLeft" or "a" or "A") keyLeft = true;
@@ -409,7 +352,6 @@
         if (left) keyLeft = value; else keyRight = value;
     }
 
-    // ---------------- lifecycle ----------------
     async Task StartGame()
     {
         if (pixiInitTask != null)
@@ -450,7 +392,7 @@
         double blazorAccumulator = 0;
 
         const double FrameMs = 1000.0 / 60.0;
-        const double BlazorFrameMs = 1000.0 / 30.0;
+        const double BlazorFrameMs = 1000.0 / 15.0;
 
         while (!token.IsCancellationRequested &&
                screen == ScreenState.Playing)
@@ -462,31 +404,20 @@
 
             if (!paused)
             {
-                // Game simulation now runs approximately 60 times/sec,
-                // not ~250 times/sec.
                 Update(dt);
-
-                // Pixi owns the moving gameplay objects.
                 await PushPixiFrameAsync();
 
-                // Blazor only needs occasional refreshes for the HUD,
-                // explosions, pickups, remaining beam effects, etc.
                 blazorAccumulator += dt;
 
                 if (blazorAccumulator >= BlazorFrameMs)
                 {
                     blazorAccumulator %= BlazorFrameMs;
-
                     await InvokeAsync(StateHasChanged);
                 }
             }
 
-            double workTime =
-                clock.Elapsed.TotalMilliseconds - frameStart;
-
-            int delay = (int)Math.Max(
-                1,
-                FrameMs - workTime);
+            double workTime = clock.Elapsed.TotalMilliseconds - frameStart;
+            int delay = (int)Math.Max(1, FrameMs - workTime);
 
             try
             {
@@ -499,7 +430,6 @@
         }
     }
 
-    // ---------------- core update ----------------
     void Update(double dt)
     {
         time += dt;
@@ -525,17 +455,14 @@
         if (hitFlashT > 0) hitFlashT -= dt;
         flashOn = ((int)(time / 90)) % 2 == 0;
 
-        // farmer movement
         if (keyLeft) farmerTargetX -= moveSpeed * dt;
         if (keyRight) farmerTargetX += moveSpeed * dt;
         farmerTargetX = Math.Max(26, Math.Min(W - 26, farmerTargetX));
         farmerX += (farmerTargetX - farmerX) * Math.Min(1, dt / 90);
 
-        // auto fire
         fireTimer -= dt;
-                if (flameT > 0)
+        if (flameT > 0)
         {
-                        // flamethrower: a fast, wide spray of short flame particles instead of aimed bullets
             if (fireTimer <= 0)
             {
                 fireTimer = 55;
@@ -586,7 +513,6 @@
         foreach (var b in enemyBullets) { b.X += b.Vx * dt; b.Y += b.Vy * dt; }
         enemyBullets.RemoveAll(b => b.Y > H + 20);
 
-        // spawn
         spawnTimer -= dt;
         if (spawnTimer <= 0)
         {
@@ -594,7 +520,6 @@
             SpawnEnemy();
         }
 
-        // enemies
         foreach (var en in enemies)
         {
             en.Phase += dt * 0.0022 * en.Wobble;
@@ -615,7 +540,6 @@
                         }
                         break;
                     case EnemyState.Hovering:
-                        // gentle bob in place -- fighters never approach the farm, they just harass from up here
                         en.Y = en.PatrolY + Math.Sin(en.Phase * 1.6) * 4;
                         en.HoverTimer -= dt;
                         en.ShootTimer -= dt;
@@ -652,25 +576,21 @@
                 }
                 else
                 {
-                    // the mothership never flees -- it hovers and fires until destroyed
                     en.Y = en.PatrolY + Math.Sin(en.Phase * 1.2) * 6;
                     en.ShootTimer -= dt;
                     if (en.ShootTimer <= 0)
                     {
                         en.ShootTimer = 1300 + rng.NextDouble() * 400;
-                         if (enemyBullets.Count < MaxEnemyBullets)
+                        if (enemyBullets.Count < MaxEnemyBullets)
                             for (int s = -1; s <= 1; s++)
                                 enemyBullets.Add(new Bullet { X = en.X, Y = en.Y + 20, Vx = s * 0.10 + (farmerX - en.X) * 0.0004, Vy = 0.19 });
-                    
                     }
                 }
             }
-            else // Thief -- the only enemy type that ever comes down toward the farm
+            else
             {
                 if (en.State == EnemyState.Descending)
                 {
-                    // steer toward the actual item it's after, so the beam visibly lines up with it,
-                    // plus a little wobble so the flight path still feels alive
                     en.X += (en.TargetFieldX - en.X) * Math.Min(1, dt / 700);
                     en.X += Math.Sin(en.Phase) * 6 * dt / 1000;
                     en.X = Math.Max(20, Math.Min(W - 20, en.X));
@@ -686,8 +606,6 @@
                 }
                 else if (en.State == EnemyState.Beaming)
                 {
-                    // holds position while the beam does its work -- shoot it down now
-                    // and the item never actually gets taken
                     en.X += (en.TargetFieldX - en.X) * Math.Min(1, dt / 400);
                     en.Y = en.PatrolY + Math.Sin(en.Phase * 1.4) * 3;
                     en.BeamElapsed += dt;
@@ -698,7 +616,7 @@
                         en.Vy = -Math.Abs(en.Vy) * 1.6;
                     }
                 }
-                else // Fleeing
+                else
                 {
                     en.X += Math.Sin(en.Phase) * en.VxBase * dt / 1000 * 0.6;
                     en.X = Math.Max(20, Math.Min(W - 20, en.X));
@@ -708,19 +626,15 @@
         }
         enemies.RemoveAll(en => en.Y < -80 || en.Y > H + 40);
 
-        // powerups
         foreach (var p in powerups) p.Y += p.Vy * dt / 1000;
         powerups.RemoveAll(p => p.Y > H + 30);
 
-        // coins
         foreach (var c in coinPickups) c.Y += c.Vy * dt / 1000;
         coinPickups.RemoveAll(c => c.Y > H + 30);
 
-        // explosions (purely visual, age out and remove themselves)
         foreach (var ex in explosions) ex.Age += dt;
         explosions.RemoveAll(ex => ex.Age >= Explosion.Lifetime);
 
-        // collisions: player bullets vs enemies
         for (int bi = bullets.Count - 1; bi >= 0; bi--)
         {
             var b = bullets[bi];
@@ -737,7 +651,6 @@
                     {
                         enemies.RemoveAt(ei);
 
-                        // catch a fleeing thief before it escapes and you get the item back
                         if (en.Type == EnemyType.Thief && en.StolenItemId != null)
                         {
                             var rescued = items.FirstOrDefault(i => i.Id == en.StolenItemId);
@@ -779,7 +692,6 @@
             }
         }
 
-        // collisions: coins vs farmer
         for (int i = coinPickups.Count - 1; i >= 0; i--)
         {
             var c = coinPickups[i];
@@ -792,7 +704,6 @@
             }
         }
 
-        // collisions: enemy bullets vs farmer
         for (int i = enemyBullets.Count - 1; i >= 0; i--)
         {
             var b = enemyBullets[i];
@@ -804,7 +715,6 @@
             }
         }
 
-        // collisions: enemy body vs farmer
         for (int i = enemies.Count - 1; i >= 0; i--)
         {
             var en = enemies[i];
@@ -816,7 +726,6 @@
             }
         }
 
-        // collisions: powerups vs farmer
         for (int i = powerups.Count - 1; i >= 0; i--)
         {
             var p = powerups[i];
@@ -832,9 +741,6 @@
     void SpawnEnemy()
     {
         if (enemies.Count >= MaxEnemies) return;
-        // an item already being chased by an active thief is off the table for any new thief --
-        // this is what stops two ships from converging on the same target and one of them
-        // "re-stealing" (actually stealing something else) once the first one finishes
         var alreadyTargeted = enemies
             .Where(e => e.Type == EnemyType.Thief && e.State != EnemyState.Fleeing && e.TargetItemId != null)
             .Select(e => e.TargetItemId!)
@@ -919,7 +825,6 @@
         var target = items.FirstOrDefault(i => i.Id == en.TargetItemId && i.Safe);
         if (target == null)
         {
-            // its assigned item got stolen by another thief first -- grab any other safe item instead
             var fallback = items.Where(i => i.Safe).ToList();
             if (fallback.Count == 0) return;
             target = fallback[rng.Next(fallback.Count)];
@@ -1067,51 +972,63 @@
         {
             Farmer = new
             {
-                X = farmerX,
-                Y = farmerY,
+                X = (float)farmerX,
+                Y = (float)farmerY,
                 Flame = flameT > 0,
                 Flash = invulnT > 0 && flashOn
             },
 
             Bullets = bullets
-                .Select(b => new
-                {
-                    b.Id,
-                    b.X,
-                    b.Y,
-                    b.IsFlame
-                })
+                .SelectMany(b => new float[] { b.Id.GetHashCode(), (float)b.X, (float)b.Y, b.IsFlame ? 1f : 0f })
                 .ToArray(),
 
             EnemyBullets = enemyBullets
-                .Select(b => new
-                {
-                    b.Id,
-                    b.X,
-                    b.Y,
-                    IsFlame = false
-                })
+                .SelectMany(b => new float[] { b.Id.GetHashCode(), (float)b.X, (float)b.Y })
                 .ToArray(),
 
             Enemies = enemies
                 .Select(en => new
                 {
-                    en.Id,
-                    en.X,
-                    en.Y,
+                    Id = en.Id.GetHashCode(),
+                    X = (float)en.X,
+                    Y = (float)en.Y,
                     en.Hp,
                     en.MaxHp,
+                    Type = (float)en.Type,
+                    IsBeaming = en.Type == EnemyType.Thief && en.State == EnemyState.Beaming,
+                    TargetItemId = en.TargetItemId, // Pass which farm item is being stolen
+                    BeamProgress = en.State == EnemyState.Beaming
+                        ? (float)Math.Min(1, en.BeamElapsed / BeamDuration)
+                        : 0f
+                })
+                .ToArray(),
 
-                    Type = en.Type.ToString(),
-                    State = en.State.ToString(),
+            // Only render ground items if they are safe AND not actively being beamed up
+            Items = items
+                .Where(i => i.Safe && !IsBeingBeamed(i.Id))
+                .Select(i => new { i.Id, X = (float)i.FieldX, Y = (float)ItemFieldY })
+                .ToArray(),
 
-                    en.TargetItemId
+            Powerups = powerups
+                .Select(p => new { Id = p.Id.GetHashCode(), p.Key, X = (float)p.X, Y = (float)p.Y })
+                .ToArray(),
+
+            Coins = coinPickups
+                .SelectMany(c => new float[] { c.Id.GetHashCode(), (float)c.X, (float)c.Y })
+                .ToArray(),
+
+            Explosions = explosions
+                .SelectMany(ex => new float[]
+                {
+                ex.Id.GetHashCode(),
+                (float)ex.X,
+                (float)ex.Y,
+                (float)ex.Size,
+                (float)Math.Min(1, ex.Age / Explosion.Lifetime)
                 })
                 .ToArray()
         };
 
-        await JS.InvokeVoidAsync(
-            "alienFarmPixi.sync",
-            frame);
+        await JS.InvokeVoidAsync("alienFarmPixi.sync", frame);
     }
 }
