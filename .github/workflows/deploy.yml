@@ -19,15 +19,24 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '8.0.419'
+          global-json-file: global.json
           workloads: wasm-tools
 
-      - name: Verify .NET and workloads
+      - name: Verify .NET environment
         run: |
+          echo "Selected SDK:"
           dotnet --version
+
+          echo "Installed SDKs:"
+          dotnet --list-sdks
+
+          echo "Installed workloads:"
           dotnet workload list
 
-      - name: Restore
+      - name: Restore workloads
+        run: dotnet workload restore AlienFarmHeist.csproj
+
+      - name: Restore packages
         run: dotnet restore AlienFarmHeist.csproj
 
       - name: Publish
