@@ -10,6 +10,14 @@
      @onkeyup="OnKeyUp"
      @onpointerdown="OnPointerMove" @onpointermove="OnPointerMove">
 
+    @if (loading)
+    {
+        <div class="overlay start-overlay">
+            <div class="loading-spinner"></div>
+            <h2>@loadingText</h2>
+        </div>
+    }
+
     <canvas @ref="gameCanvas"
             class="pixi-game-layer">
     </canvas>
@@ -129,6 +137,9 @@
 @code {
     const double W = 480;
     const double H = 840;
+
+    bool loading = true;
+    string loadingText = "Loading Farm Assets...";
 
     ElementReference stageRef;
     Random rng = new();
@@ -296,6 +307,8 @@
             });
 
         pixiReady = true;
+        loading = false;
+        await InvokeAsync(StateHasChanged);
     }
 
     const double ItemFieldY = H * 0.72;
