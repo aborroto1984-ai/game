@@ -25,18 +25,31 @@
 
         app = new PIXI.Application();
 
+        const stageScale = parseFloat(
+            getComputedStyle(document.documentElement)
+                .getPropertyValue('--game-scale')
+        ) || 1;
+
+        const pixelRatio = window.devicePixelRatio || 1;
+
+        // Account for BOTH:
+        // 1. high-DPI/Retina displays
+        // 2. our CSS stage scaling
+        const renderResolution = Math.min(
+            pixelRatio * stageScale,
+            3
+        );
+
         await app.init({
             canvas: canvas,
             width: options.width,
             height: options.height,
             backgroundAlpha: 0,
-            antialias: false,
+            antialias: true,
             preference: "webgl",
-            resolution: 1
+            resolution: renderResolution,
+            autoDensity: true
         });
-
-        app.canvas.style.width = options.width + "px";
-        app.canvas.style.height = options.height + "px";
 
         await loadTextures(options.assets);
 
