@@ -6,10 +6,11 @@ window.gameAudio = (function () {
     let currentMusicSrc = null;
     let unlockArmed = false;
 
-    // Browsers block audio.play() until the page has had at least one real
-    // user gesture (click/tap/key). If our first attempt gets blocked, this
-    // arms a one-time listener that retries as soon as that gesture happens,
-    // instead of just staying silent forever.
+    // Pre-allocate a pool of 8 reusable channels for mobile browser safety
+    const POOL_SIZE = 8;
+    const sfxPool = Array.from({ length: POOL_SIZE }, () => new Audio());
+    let poolIndex = 0;
+
     function armUnlockRetry() {
         if (unlockArmed) return;
         unlockArmed = true;
@@ -48,10 +49,15 @@ window.gameAudio = (function () {
     }
 
     function playSfx(src, volume) {
-        // a fresh Audio() per call so overlapping SFX (e.g. rapid-fire bullets) don't cut each other off
-        const a = new Audio(src);
-        a.volume = volume ?? 0.7;
-        a.play().catch(() => { });
+        // Grab next available channel in round-robin fashion
+        const audio = sfxPool[poolIndex];
+        poolIndex = (poolIndex + 1) % POOL_SIZE;
+
+        audio.pause();
+        audio.currentTime = 0;
+        audio.src = src;
+        audio.volume = volume ?? 0.7;
+        audio.play().catch(() => { });
     }
 
     return { playMusic, stopMusic, pauseMusic, resumeMusic, playSfx };
