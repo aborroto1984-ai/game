@@ -1,0 +1,43 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish
+        run: dotnet publish AlienFarmHeist.csproj -c Release -o release --nologo
+
+      # GitHub Pages serves this repo at /<repo-name>/, so the app's
+      # <base href="/" /> needs to become <base href="/<repo-name>/" />
+      - name: Fix base href for GitHub Pages
+        run: |
+          sed -i 's#<base href="/" />#<base href="/${{ github.event.repository.name }}/" />#g' release/wwwroot/index.html
+
+      - name: Add .nojekyll (stops GitHub Pages ignoring _framework folder)
+        run: touch release/wwwroot/.nojekyll
+
+      - name: Copy index.html to 404.html (keeps deep links working)
+        run: cp release/wwwroot/index.html release/wwwroot/404.html
+
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: release/wwwroot
+          publish_branch: gh-pages

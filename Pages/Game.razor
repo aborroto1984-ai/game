@@ -1,0 +1,964 @@
+@page "/"
+@using AlienFarmHeist.Models
+@using System.Globalization
+@inject IJSRuntime JS
+@implements IDisposable
+
+<div class="stage" tabindex="0" @ref="stageRef"
+     @onkeydown="OnKeyDown" @onkeydown:preventDefault
+     @onkeyup="OnKeyUp"
+     @onpointerdown="OnPointerMove" @onpointermove="OnPointerMove">
+
+    <div class="hud">
+        <div class="pill">⭐ @score</div>
+        <div class="pill">🪙 @coinsThisRun</div>
+        <div class="pill">🏠 @items.Count(i => i.Safe)/@items.Count</div>
+        <div class="pill">@Hearts()</div>
+    </div>
+
+    @if (screen == ScreenState.Playing && !paused)
+    {
+        <button class="pause-btn" @onclick="TogglePause">⏸</button>
+    }
+
+    @if (!string.IsNullOrEmpty(waveBannerMsg))
+    {
+        <div class="wave-banner">@waveBannerMsg</div>
+    }
+
+    @if (!string.IsNullOrEmpty(toastMsg))
+    {
+        <div class="toast show">@toastMsg</div>
+    }
+
+    @foreach (var d in decor)
+    {
+        <div class="decor-plant" style="left:@Px(d.X); top:@Px(d.Y); width:@Px(d.W); height:@Px(d.H);">
+            <img src="@d.Image" class="sprite-img" alt="" />
+        </div>
+    }
+
+    @foreach (var it in items)
+    {
+        <div class="field-item @(it.Safe ? (IsBeingBeamed(it.Id) ? "beaming" : "") : "stolen")" style="left:@Px(it.FieldX); top:@Px(ItemFieldY);">
+            <img src="@Sprites.ForItem(it.Id)" class="sprite-img" alt="" />
+        </div>
+    }
+
+    @foreach (var b in bullets)
+    {
+        <span class="bullet @(b.IsFlame ? "flame" : "player")" style="left:@Px(b.X); top:@Px(b.Y);"></span>
+    }
+    @foreach (var b in enemyBullets)
+    {
+        <span class="bullet enemy" style="left:@Px(b.X); top:@Px(b.Y);"></span>
+    }
+
+    @foreach (var ex in explosions)
+    {
+        double prog = Math.Min(1, ex.Age / Explosion.Lifetime);
+        double scale = 0.4 + prog * 0.9;
+        double opacity = 1 - prog;
+        int boxSize = ex.Size switch { ExplosionSize.Small => 60, ExplosionSize.Medium => 100, _ => 160 };
+        string img = ex.Size switch
+        {
+            ExplosionSize.Small => Sprites.FxSmallExplosion,
+            ExplosionSize.Medium => Sprites.FxMediumExplosion,
+            _ => Sprites.FxLargeExplosion,
+        };
+        <div class="explosion" style="left:@Px(ex.X); top:@Px(ex.Y); width:@Px(boxSize); height:@Px(boxSize); transform:translate(-50%,-50%) scale(@Num(scale)); opacity:@Num(opacity);">
+            <img src="@img" class="sprite-img" alt="" />
+        </div>
+    }
+
+    @foreach (var en in enemies)
+    {
+        <div class="enemy-wrap @(en.Type == EnemyType.Boss ? "boss-wrap" : "")" style="left:@Px(en.X); top:@Px(en.Y);">
+            @if (en.Type == EnemyType.Thief && (en.State == EnemyState.Descending || en.State == EnemyState.Beaming) && en.TargetItemId != null)
+            {
+                <div class="target-badge"><img src="@Sprites.ForItem(en.TargetItemId)" class="sprite-img" alt="" /></div>
+            }
+            @if (en.Type == EnemyType.Thief && en.State == EnemyState.Beaming)
+            {
+                <div class="beam-column" style="height:@Px(Math.Max(0, ItemFieldY - en.Y));">
+                    <img src="@Sprites.FxBeamColumn" class="sprite-img" alt="" />
+                </div>
+            }
+            else if ((en.Type == EnemyType.Fighter || en.Type == EnemyType.Elite) && en.State == EnemyState.Hovering)
+            {
+                <div class="attack-badge">⚡</div>
+            }
+            <div class="ufo-sprite @(en.Type.ToString().ToLowerInvariant())">
+                <img src="@(en.Type switch {
+                    EnemyType.Thief => Sprites.UfoThief,
+                    EnemyType.Elite => Sprites.UfoElite,
+                    EnemyType.Boss => Sprites.UfoBoss,
+                    _ => Sprites.UfoFighter,
+                })" class="sprite-img" alt="" />
+            </div>
+            @if (en.Type == EnemyType.Boss)
+            {
+                <div class="boss-hp-track"><div class="boss-hp-fill" style="width:@Num(100.0 * en.Hp / en.MaxHp)%;"></div></div>
+            }
+            else
+            {
+                <span class="hp @(en.Type == EnemyType.Thief ? "hp-thief" : en.Type == EnemyType.Elite ? "hp-elite" : "hp-fighter")">@en.Hp</span>
+            }
+        </div>
+
+        @if (en.Type == EnemyType.Thief && en.State == EnemyState.Beaming && en.TargetItemId != null)
+        {
+            double beamProgress = Math.Min(1, en.BeamElapsed / BeamDuration);
+            double eased = beamProgress * beamProgress;
+            double riseY = ItemFieldY - (ItemFieldY - en.Y) * eased;
+            <div class="beam-focus" style="left:@Px(en.X); top:@Px(riseY);">
+                <img src="@Sprites.FxBeamFocus" class="sprite-img" alt="" />
+            </div>
+            <div class="rising-item" style="left:@Px(en.X); top:@Px(riseY);">
+                <img src="@Sprites.ForItem(en.TargetItemId)" class="sprite-img" alt="" />
+            </div>
+        }
+    }
+
+    @foreach (var p in powerups)
+    {
+        <div class="powerup" style="left:@Px(p.X); top:@Px(p.Y);"><img src="@Sprites.ForPower(p.Key)" class="sprite-img" alt="" /></div>
+    }
+
+    @foreach (var c in coinPickups)
+    {
+        <div class="powerup" style="left:@Px(c.X); top:@Px(c.Y);"><img src="@Sprites.Coin" class="sprite-img" alt="" /></div>
+    }
+
+    <div class="farmer @(shieldT > 0 ? "shielded" : "") @((invulnT > 0 && flashOn) ? "flash" : "") @(flameT > 0 ? "flame-mode" : "")"
+         style="left:@Px(farmerX); top:@Px(farmerY);"><img src="@(flameT > 0 ? Sprites.FarmerFlame : Sprites.Farmer)" class="sprite-img" alt="Ted" /></div>
+
+    @if (hitFlashT > 0)
+    {
+        <div class="hit-flash" style="opacity:@Num(Math.Min(0.35, hitFlashT / 220.0 * 0.35));"></div>
+    }
+
+    <div class="touch-controls">
+        <div class="side" @onpointerdown="() => SetKey(true, true)" @onpointerup="() => SetKey(true, false)" @onpointerleave="() => SetKey(true, false)"></div>
+        <div class="side" @onpointerdown="() => SetKey(false, true)" @onpointerup="() => SetKey(false, false)" @onpointerleave="() => SetKey(false, false)"></div>
+    </div>
+
+    @if (screen == ScreenState.Start)
+    {
+        <div class="overlay start-overlay">
+            <div class="progress-strip">
+                <span>🪙 @Progress.TotalCoins</span>
+                <span>⭐ Best: @Progress.BestScore</span>
+            </div>
+            <button class="help-toggle" @onclick="() => showHelp = !showHelp">❓ How to Play</button>
+            @if (showHelp)
+            {
+                <div class="controls-hint">
+                    🎮 Move and auto-shoot — arrow keys / A D, or drag<br />
+                    🛸 Badged ships are thieves beaming up your stuff — shoot them down before the beam finishes to save it!<br />
+                    👑 Mothership every 5th wave &nbsp; 🔥 grab the flamethrower when you see it
+                </div>
+            }
+            <button class="play" @onclick="StartGame">Save the Farm</button>
+            <button class="shop-link" @onclick="GoToShop">🛒 Upgrade Shop</button>
+        </div>
+    }
+    else if (screen == ScreenState.Shop)
+    {
+        <div class="overlay shop-overlay">
+            <h1>UPGRADE SHOP</h1>
+            <div class="progress-strip"><span>🪙 @Progress.TotalCoins available</span></div>
+            <div class="shop-list">
+                @foreach (var u in GameProgress.Upgrades)
+                {
+                    int level = Progress.LevelFor(u.Key);
+                    bool maxed = level >= GameProgress.MaxLevel;
+                    int cost = GameProgress.CostFor(u.Key, level);
+                    bool canAfford = !maxed && Progress.TotalCoins >= cost;
+                    <div class="shop-row">
+                        <img src="@Sprites.ForUpgrade(u.Key)" class="shop-icon" alt="" />
+                        <div class="shop-info">
+                            <div class="shop-name">@u.Label <span class="shop-level">Lv @level/@GameProgress.MaxLevel</span></div>
+                            <div class="shop-desc">@u.Description</div>
+                        </div>
+                        <button class="shop-buy" disabled="@(!canAfford)" @onclick="() => BuyUpgrade(u.Key)">
+                            @(maxed ? "MAX" : $"🪙 {cost}")
+                        </button>
+                    </div>
+                }
+            </div>
+            <button class="play" @onclick="BackToStart">Back</button>
+        </div>
+    }
+    else if (screen == ScreenState.End)
+    {
+        <div class="overlay">
+            <h1>@endTitle</h1>
+            <div class="sub">@endMsg</div>
+            @if (isNewBest)
+            {
+                <div class="new-best">🏆 NEW BEST SCORE! 🏆</div>
+            }
+            <div class="stat-line">Score: <b>@score</b> &nbsp; Wave: <b>@wave</b></div>
+            <div class="stat-line">🪙 +@coinsThisRun this run &nbsp; (total: @Progress.TotalCoins)</div>
+            <button class="play" @onclick="StartGame">Try Again</button>
+            <button class="shop-link" @onclick="GoToShop">🛒 Upgrade Shop</button>
+        </div>
+    }
+    else if (screen == ScreenState.Playing && paused)
+    {
+        <div class="overlay">
+            <h1>⏸ PAUSED</h1>
+            <div class="stat-line">Score: <b>@score</b> &nbsp; Wave: <b>@wave</b></div>
+            <button class="play" @onclick="TogglePause">Resume</button>
+            <button class="shop-link" @onclick="QuitToMenu">🚪 Quit to Menu</button>
+        </div>
+    }
+</div>
+
+@code {
+    // ---- fixed logical playfield size (CSS pixels) ----
+    const double W = 480;
+    const double H = 840;
+
+
+    ElementReference stageRef;
+    Random rng = new();
+    CancellationTokenSource? loopCts;
+    CancellationTokenSource? toastCts;
+
+    ScreenState screen = ScreenState.Start;
+    bool paused = false;
+    bool showHelp = false;
+
+    double time, difficulty = 1;
+    int score, lives;
+
+    double farmerX = W / 2, farmerTargetX = W / 2;
+    double farmerY = H - 72;
+    bool keyLeft, keyRight;
+
+    double fireTimer, fireRate = 300;
+    double spawnTimer, spawnInterval = 1900;
+    double moveSpeed = 0.42;
+
+    double shieldT, rapidT, wideT, flameT, invulnT, hitFlashT;
+    bool flashOn;
+
+    List<Bullet> bullets = new();
+    List<Bullet> enemyBullets = new();
+    List<Enemy> enemies = new();
+    List<PowerUp> powerups = new();
+    List<CoinPickup> coinPickups = new();
+    List<FarmItem> items = new();
+
+    GameProgress Progress = new();
+    int wave = 1, lastWaveTriggered = 1, coinsThisRun = 0;
+    bool isNewBest = false;
+    const double WaveDurationMs = 25000;
+
+    string toastMsg = "";
+    string waveBannerMsg = "";
+    string endTitle = "";
+    string endMsg = "";
+
+    static readonly (string Id, string Name)[] ItemDefs = new[]
+    {
+        ("cow", "the cow"),
+        ("chicken", "the chicken"),
+        ("tractor", "the tractor"),
+        ("truck", "the truck"),
+        ("corn", "the corn"),
+        ("pumpkin", "the pumpkins"),
+        ("wife", "HIS WIFE"),
+    };
+
+    static readonly Dictionary<string, string> StealLines = new()
+    {
+        ["cow"] = "Bessie the cow got beamed up! 🐄🛸",
+        ["chicken"] = "A chicken just got abducted mid-cluck! 🐔",
+        ["tractor"] = "They stole the tractor. Who steals a TRACTOR.",
+        ["truck"] = "The truck just flew off... upward.",
+        ["corn"] = "The corn is gone. All of it. Every ear.",
+        ["pumpkin"] = "Pumpkins: abducted. Ted is fuming.",
+        ["wife"] = "THEY TOOK HIS WIFE. THIS IS PERSONAL NOW.",
+    };
+
+    static readonly (string Key, string Icon, string Label)[] PowerupDefs = new[]
+    {
+        ("rapid", "⚡", "Rapid Fire"),
+        ("wide", "💥", "Wide Shot"),
+        ("shield", "🛡️", "Shield"),
+        ("life", "❤️", "+1 Life"),
+        ("flame", "🔥", "FLAMETHROWER"),
+    };
+
+    List<Explosion> explosions = new();
+
+    List<DecorPlant> decor = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        items = ItemDefs.Select(d => new FarmItem { Id = d.Id, Name = d.Name, Safe = true }).ToList();
+        for (int i = 0; i < items.Count; i++)
+            items[i].FieldX = W * (i + 1) / (items.Count + 1);
+
+        // scatter a little cornfield and pumpkin patch around the actual stealable
+        // corn/pumpkin items, so it's visually obvious which crop an incoming thief is after
+        double cornX = items.First(i => i.Id == "corn").FieldX;
+        double pumpkinX = items.First(i => i.Id == "pumpkin").FieldX;
+
+        // a light dusting of cornstalks/pumpkin vines behind the actual corn/pumpkin
+        // items -- kept well inside each item's own slot width and pushed well above
+        // the item row (items moved further down the field), so it clearly reads as
+        // distant backdrop rather than something competing with the actual target
+        decor.Add(new() { Image = "images/corn_plant.png", X = cornX - 18, Y = ItemFieldY - 95, W = 22, H = 66 });
+        decor.Add(new() { Image = "images/corn_plant.png", X = cornX + 19, Y = ItemFieldY - 88, W = 20, H = 60 });
+
+        decor.Add(new() { Image = "images/pumpkin_plant.png", X = pumpkinX - 19, Y = ItemFieldY - 82, W = 44, H = 42 });
+        decor.Add(new() { Image = "images/pumpkin_plant.png", X = pumpkinX + 19, Y = ItemFieldY - 76, W = 40, H = 38 });
+
+        Progress = await GameProgress.LoadAsync(JS);
+        _ = PlayMusic("music_intro.mp3");
+    }
+
+    const double ItemFieldY = H * 0.76;
+    const double BeamHoverY = H * 0.50;
+    const double BeamDuration = 1300;
+
+    string Hearts() => lives > 0 ? string.Concat(Enumerable.Repeat("❤️", lives)) : "💀";
+
+    bool IsBeingBeamed(string itemId) =>
+        enemies.Any(e => e.Type == EnemyType.Thief && e.State == EnemyState.Beaming && e.TargetItemId == itemId);
+
+    // ---------------- audio ----------------
+    // Drop files into wwwroot/audio/ with these exact names -- nothing else to wire up.
+    async Task PlayMusic(string file, double volume = 0.5)
+    {
+        try { await JS.InvokeVoidAsync("gameAudio.playMusic", $"audio/{file}", volume); } catch { }
+    }
+    async Task PauseMusic() { try { await JS.InvokeVoidAsync("gameAudio.pauseMusic"); } catch { } }
+    async Task ResumeMusic() { try { await JS.InvokeVoidAsync("gameAudio.resumeMusic"); } catch { } }
+    async Task PlaySfx(string file, double volume = 0.7)
+    {
+        try { await JS.InvokeVoidAsync("gameAudio.playSfx", $"audio/{file}", volume); } catch { }
+    }
+
+    // CSS values must always use '.' as the decimal separator, regardless
+    // of the browser's locale — these keep every style="" binding safe.
+    static string Px(double v) => v.ToString(CultureInfo.InvariantCulture) + "px";
+    static string Num(double v) => v.ToString(CultureInfo.InvariantCulture);
+
+    // ---------------- input ----------------
+    void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key is "ArrowLeft" or "a" or "A") keyLeft = true;
+        if (e.Key is "ArrowRight" or "d" or "D") keyRight = true;
+    }
+
+    void OnKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key is "ArrowLeft" or "a" or "A") keyLeft = false;
+        if (e.Key is "ArrowRight" or "d" or "D") keyRight = false;
+    }
+
+    void OnPointerMove(PointerEventArgs e)
+    {
+        if (screen != ScreenState.Playing) return;
+        var x = Math.Max(24, Math.Min(W - 24, e.OffsetX));
+        farmerTargetX = x;
+        keyLeft = false;
+        keyRight = false;
+    }
+
+    void SetKey(bool left, bool value)
+    {
+        if (left) keyLeft = value; else keyRight = value;
+    }
+
+    // ---------------- lifecycle ----------------
+    async Task StartGame()
+    {
+        time = 0; difficulty = 1; score = 0; lives = 4 + Progress.LifeLevel;
+        farmerX = W / 2; farmerTargetX = W / 2;
+        keyLeft = keyRight = false;
+        fireTimer = 0; fireRate = Math.Max(210, 300 - Progress.FireRateLevel * 18);
+        moveSpeed = 0.42 + Progress.SpeedLevel * 0.035;
+        spawnTimer = 0; spawnInterval = 1900;
+        shieldT = rapidT = wideT = flameT = invulnT = hitFlashT = 0;
+        explosions.Clear();
+        bullets.Clear(); enemyBullets.Clear(); enemies.Clear(); powerups.Clear(); coinPickups.Clear();
+        foreach (var it in items) it.Safe = true;
+        toastMsg = ""; waveBannerMsg = "";
+        wave = 1; lastWaveTriggered = 1; coinsThisRun = 0; isNewBest = false;
+
+        screen = ScreenState.Playing;
+        StateHasChanged();
+        _ = PlayMusic(rng.Next(2) == 0 ? "music_gameplay_1.mp3" : "music_gameplay_2.mp3");
+
+        loopCts?.Cancel();
+        loopCts = new CancellationTokenSource();
+        _ = RunLoop(loopCts.Token);
+
+        await Task.Delay(1);
+        await stageRef.FocusAsync();
+    }
+
+    async Task RunLoop(CancellationToken token)
+    {
+        var last = DateTime.UtcNow;
+        while (!token.IsCancellationRequested && screen == ScreenState.Playing)
+        {
+            var now = DateTime.UtcNow;
+            double dt = Math.Min((now - last).TotalMilliseconds, 40);
+            last = now;
+
+            if (!paused) Update(dt);
+            await InvokeAsync(StateHasChanged);
+            await Task.Delay(16, token).ContinueWith(_ => { });
+        }
+    }
+
+    // ---------------- core update ----------------
+    void Update(double dt)
+    {
+        time += dt;
+        difficulty = 1 + time / 34000.0;
+        spawnInterval = Math.Max(700, 1900 - time / 55);
+
+        int currentWave = 1 + (int)(time / WaveDurationMs);
+        if (currentWave > lastWaveTriggered)
+        {
+            lastWaveTriggered = currentWave;
+            wave = currentWave;
+            WaveBanner(wave % 5 == 0 ? $"⚠ WAVE {wave} — MOTHERSHIP INBOUND ⚠" : $"WAVE {wave}");
+            _ = PlaySfx("sfx_wave_start.wav");
+            if (wave % 5 == 0 && !enemies.Any(e => e.Type == EnemyType.Boss))
+                SpawnBoss();
+        }
+
+        if (shieldT > 0) shieldT -= dt;
+        if (rapidT > 0) rapidT -= dt;
+        if (wideT > 0) wideT -= dt;
+        if (flameT > 0) flameT -= dt;
+        if (invulnT > 0) invulnT -= dt;
+        if (hitFlashT > 0) hitFlashT -= dt;
+        flashOn = ((int)(time / 90)) % 2 == 0;
+
+        // farmer movement
+        if (keyLeft) farmerTargetX -= moveSpeed * dt;
+        if (keyRight) farmerTargetX += moveSpeed * dt;
+        farmerTargetX = Math.Max(26, Math.Min(W - 26, farmerTargetX));
+        farmerX += (farmerTargetX - farmerX) * Math.Min(1, dt / 90);
+
+        // auto fire
+        fireTimer -= dt;
+        if (flameT > 0)
+        {
+            // flamethrower: a fast, wide spray of short flame particles instead of aimed bullets
+            if (fireTimer <= 0)
+            {
+                fireTimer = 55;
+                double fy = farmerY - 18;
+                for (int s = 0; s < 2; s++)
+                {
+                    double spread = (rng.NextDouble() - 0.5) * 0.32;
+                    bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = spread, Vy = -0.44 - rng.NextDouble() * 0.08, IsFlame = true });
+                }
+                _ = PlaySfx("sfx_bullet.mp3", 0.22);
+            }
+        }
+        else
+        {
+            double rate = rapidT > 0 ? fireRate * 0.45 : fireRate;
+            if (fireTimer <= 0)
+            {
+                fireTimer = rate;
+                double fy = farmerY - 18;
+                if (wideT > 0)
+                {
+                    bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0, Vy = -0.42 });
+                    bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = -0.14, Vy = -0.4 });
+                    bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0.14, Vy = -0.4 });
+                }
+                else
+                {
+                    bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0, Vy = -0.46 });
+                }
+                _ = PlaySfx("sfx_bullet.mp3", 0.35);
+            }
+        }
+
+        foreach (var b in bullets) { b.X += b.Vx * dt; b.Y += b.Vy * dt; }
+        bullets.RemoveAll(b => b.Y < -20);
+
+        foreach (var b in enemyBullets) { b.X += b.Vx * dt; b.Y += b.Vy * dt; }
+        enemyBullets.RemoveAll(b => b.Y > H + 20);
+
+        // spawn
+        spawnTimer -= dt;
+        if (spawnTimer <= 0)
+        {
+            spawnTimer = spawnInterval;
+            SpawnEnemy();
+        }
+
+        // enemies
+        foreach (var en in enemies)
+        {
+            en.Phase += dt * 0.0022 * en.Wobble;
+
+            if (en.Type == EnemyType.Fighter || en.Type == EnemyType.Elite)
+            {
+                en.X += Math.Sin(en.Phase) * en.VxBase * dt / 1000 * 0.6;
+                en.X = Math.Max(20, Math.Min(W - 20, en.X));
+
+                switch (en.State)
+                {
+                    case EnemyState.Descending:
+                        en.Y += en.Vy * dt / 1000;
+                        if (en.Y >= en.PatrolY)
+                        {
+                            en.Y = en.PatrolY;
+                            en.State = EnemyState.Hovering;
+                        }
+                        break;
+                    case EnemyState.Hovering:
+                        // gentle bob in place -- fighters never approach the farm, they just harass from up here
+                        en.Y = en.PatrolY + Math.Sin(en.Phase * 1.6) * 4;
+                        en.HoverTimer -= dt;
+                        en.ShootTimer -= dt;
+                        if (en.ShootTimer <= 0)
+                        {
+                            en.ShootTimer = (en.Type == EnemyType.Elite ? 1100 : 1600) + rng.NextDouble() * 900;
+                            enemyBullets.Add(new Bullet { X = en.X, Y = en.Y + 14, Vx = (farmerX - en.X) * 0.0007, Vy = 0.17 });
+                        }
+                        if (en.HoverTimer <= 0)
+                        {
+                            en.State = EnemyState.Fleeing;
+                            en.Vy = -Math.Abs(en.Vy) * 1.4;
+                        }
+                        break;
+                    case EnemyState.Fleeing:
+                        en.Y += en.Vy * dt / 1000;
+                        break;
+                }
+            }
+            else if (en.Type == EnemyType.Boss)
+            {
+                en.X += Math.Sin(en.Phase * 0.7) * 14 * dt / 1000;
+                en.X = Math.Max(60, Math.Min(W - 60, en.X));
+
+                if (en.State == EnemyState.Descending)
+                {
+                    en.Y += en.Vy * dt / 1000;
+                    if (en.Y >= en.PatrolY)
+                    {
+                        en.Y = en.PatrolY;
+                        en.State = EnemyState.Hovering;
+                    }
+                }
+                else
+                {
+                    // the mothership never flees -- it hovers and fires until destroyed
+                    en.Y = en.PatrolY + Math.Sin(en.Phase * 1.2) * 6;
+                    en.ShootTimer -= dt;
+                    if (en.ShootTimer <= 0)
+                    {
+                        en.ShootTimer = 1300 + rng.NextDouble() * 400;
+                        for (int s = -1; s <= 1; s++)
+                            enemyBullets.Add(new Bullet { X = en.X, Y = en.Y + 20, Vx = s * 0.10 + (farmerX - en.X) * 0.0004, Vy = 0.19 });
+                    }
+                }
+            }
+            else // Thief -- the only enemy type that ever comes down toward the farm
+            {
+                if (en.State == EnemyState.Descending)
+                {
+                    // steer toward the actual item it's after, so the beam visibly lines up with it,
+                    // plus a little wobble so the flight path still feels alive
+                    en.X += (en.TargetFieldX - en.X) * Math.Min(1, dt / 700);
+                    en.X += Math.Sin(en.Phase) * 6 * dt / 1000;
+                    en.X = Math.Max(20, Math.Min(W - 20, en.X));
+
+                    en.Y += en.Vy * dt / 1000;
+                    if (en.Y >= en.PatrolY)
+                    {
+                        en.Y = en.PatrolY;
+                        en.State = EnemyState.Beaming;
+                        en.BeamElapsed = 0;
+                        _ = PlaySfx("sfx_beam_deploy.wav");
+                    }
+                }
+                else if (en.State == EnemyState.Beaming)
+                {
+                    // holds position while the beam does its work -- shoot it down now
+                    // and the item never actually gets taken
+                    en.X += (en.TargetFieldX - en.X) * Math.Min(1, dt / 400);
+                    en.Y = en.PatrolY + Math.Sin(en.Phase * 1.4) * 3;
+                    en.BeamElapsed += dt;
+                    if (en.BeamElapsed >= BeamDuration)
+                    {
+                        StealTargetItem(en);
+                        en.State = EnemyState.Fleeing;
+                        en.Vy = -Math.Abs(en.Vy) * 1.6;
+                    }
+                }
+                else // Fleeing
+                {
+                    en.X += Math.Sin(en.Phase) * en.VxBase * dt / 1000 * 0.6;
+                    en.X = Math.Max(20, Math.Min(W - 20, en.X));
+                    en.Y += en.Vy * dt / 1000;
+                }
+            }
+        }
+        enemies.RemoveAll(en => en.Y < -80 || en.Y > H + 40);
+
+        // powerups
+        foreach (var p in powerups) p.Y += p.Vy * dt / 1000;
+        powerups.RemoveAll(p => p.Y > H + 30);
+
+        // coins
+        foreach (var c in coinPickups) c.Y += c.Vy * dt / 1000;
+        coinPickups.RemoveAll(c => c.Y > H + 30);
+
+        // explosions (purely visual, age out and remove themselves)
+        foreach (var ex in explosions) ex.Age += dt;
+        explosions.RemoveAll(ex => ex.Age >= Explosion.Lifetime);
+
+        // collisions: player bullets vs enemies
+        for (int bi = bullets.Count - 1; bi >= 0; bi--)
+        {
+            var b = bullets[bi];
+            for (int ei = enemies.Count - 1; ei >= 0; ei--)
+            {
+                var en = enemies[ei];
+                double hitR = en.Type == EnemyType.Boss ? 55 : 26;
+                double dx = b.X - en.X, dy = b.Y - en.Y;
+                if (dx * dx + dy * dy < hitR * hitR)
+                {
+                    bullets.RemoveAt(bi);
+                    en.Hp -= 1;
+                    if (en.Hp <= 0)
+                    {
+                        enemies.RemoveAt(ei);
+
+                        // catch a fleeing thief before it escapes and you get the item back
+                        if (en.Type == EnemyType.Thief && en.StolenItemId != null)
+                        {
+                            var rescued = items.FirstOrDefault(i => i.Id == en.StolenItemId);
+                            if (rescued != null)
+                            {
+                                rescued.Safe = true;
+                                Toast($"Rescued {rescued.Name}! 🎉");
+                            }
+                        }
+
+                        switch (en.Type)
+                        {
+                            case EnemyType.Thief:
+                                score += 16;
+                                DropCoinMaybe(en.X, en.Y, 0.25, 1);
+                                SpawnExplosion(en.X, en.Y, ExplosionSize.Small);
+                                break;
+                            case EnemyType.Elite:
+                                score += 25;
+                                DropCoinMaybe(en.X, en.Y, 1.0, 2);
+                                SpawnExplosion(en.X, en.Y, ExplosionSize.Medium);
+                                break;
+                            case EnemyType.Boss:
+                                score += 150;
+                                DropCoinMaybe(en.X, en.Y, 1.0, 12);
+                                WaveBanner("👽 MOTHERSHIP DESTROYED! 👽");
+                                SpawnExplosion(en.X, en.Y, ExplosionSize.Large);
+                                break;
+                            default:
+                                score += 10;
+                                DropCoinMaybe(en.X, en.Y, 0.15, 1);
+                                SpawnExplosion(en.X, en.Y, ExplosionSize.Small);
+                                break;
+                        }
+                        DropPowerupMaybe(en.X, en.Y);
+                    }
+                    break;
+                }
+            }
+        }
+
+        // collisions: coins vs farmer
+        for (int i = coinPickups.Count - 1; i >= 0; i--)
+        {
+            var c = coinPickups[i];
+            double dx = c.X - farmerX, dy = c.Y - farmerY;
+            if (dx * dx + dy * dy < 31 * 31)
+            {
+                coinPickups.RemoveAt(i);
+                coinsThisRun += c.Value;
+                _ = PlaySfx("sfx_coin.wav");
+            }
+        }
+
+        // collisions: enemy bullets vs farmer
+        for (int i = enemyBullets.Count - 1; i >= 0; i--)
+        {
+            var b = enemyBullets[i];
+            double dx = b.X - farmerX, dy = b.Y - farmerY;
+            if (dx * dx + dy * dy < 14 * 14)
+            {
+                enemyBullets.RemoveAt(i);
+                Hurt();
+            }
+        }
+
+        // collisions: enemy body vs farmer
+        for (int i = enemies.Count - 1; i >= 0; i--)
+        {
+            var en = enemies[i];
+            double dx = en.X - farmerX, dy = en.Y - farmerY;
+            if (dx * dx + dy * dy < 31 * 31)
+            {
+                enemies.RemoveAt(i);
+                Hurt();
+            }
+        }
+
+        // collisions: powerups vs farmer
+        for (int i = powerups.Count - 1; i >= 0; i--)
+        {
+            var p = powerups[i];
+            double dx = p.X - farmerX, dy = p.Y - farmerY;
+            if (dx * dx + dy * dy < 31 * 31)
+            {
+                powerups.RemoveAt(i);
+                ApplyPowerup(p);
+            }
+        }
+    }
+
+    void SpawnEnemy()
+    {
+        // an item already being chased by an active thief is off the table for any new thief --
+        // this is what stops two ships from converging on the same target and one of them
+        // "re-stealing" (actually stealing something else) once the first one finishes
+        var alreadyTargeted = enemies
+            .Where(e => e.Type == EnemyType.Thief && e.State != EnemyState.Fleeing && e.TargetItemId != null)
+            .Select(e => e.TargetItemId!)
+            .ToHashSet();
+        var availableTargets = items.Where(i => i.Safe && !alreadyTargeted.Contains(i.Id)).ToList();
+
+        bool isThief = rng.NextDouble() < 0.30 && availableTargets.Count > 0;
+        bool isElite = !isThief && wave >= 3 && rng.NextDouble() < Math.Min(0.35, 0.10 + wave * 0.03);
+        var type = isThief ? EnemyType.Thief : isElite ? EnemyType.Elite : EnemyType.Fighter;
+
+        int hp = Math.Min(2 + (int)(difficulty * 0.7) + rng.Next(0, 2), 9);
+        if (isElite) hp += 5;
+
+        var en = new Enemy
+        {
+            X = 30 + rng.NextDouble() * (W - 60),
+            Y = -30,
+            Vy = (isThief ? 24 : 30) * (0.9 + rng.NextDouble() * 0.5) * (1 + difficulty * 0.06),
+            VxBase = (rng.NextDouble() < 0.5 ? -1 : 1) * (20 + rng.NextDouble() * 24),
+            Phase = rng.NextDouble() * Math.PI * 2,
+            Hp = hp,
+            MaxHp = hp,
+            Type = type,
+            ShootTimer = 600 + rng.NextDouble() * 800,
+            StealZoneY = ItemFieldY,
+            Wobble = rng.NextDouble() * 2 + 1,
+            PatrolY = isThief ? BeamHoverY : H * (0.30 + rng.NextDouble() * 0.18),
+            HoverTimer = 4000 + rng.NextDouble() * 2500,
+        };
+        if (isThief)
+        {
+            var target = availableTargets[rng.Next(availableTargets.Count)];
+            en.TargetItemId = target.Id;
+            en.TargetFieldX = target.FieldX;
+        }
+        enemies.Add(en);
+    }
+
+    void SpawnBoss()
+    {
+        int hp = 20 + wave * 4;
+        enemies.Add(new Enemy
+        {
+            X = W / 2,
+            Y = -60,
+            Vy = 42,
+            Phase = 0,
+            Hp = hp,
+            MaxHp = hp,
+            Type = EnemyType.Boss,
+            ShootTimer = 1800,
+            PatrolY = H * 0.22,
+            Wobble = 1,
+        });
+    }
+
+    void DropPowerupMaybe(double x, double y)
+    {
+        double chance = Math.Min(0.6, 0.32 + Progress.PowerupLevel * 0.05);
+        if (rng.NextDouble() < chance)
+        {
+            var def = PowerupDefs[rng.Next(PowerupDefs.Length)];
+            powerups.Add(new PowerUp { X = x, Y = y, Vy = 60, Key = def.Key, Icon = def.Icon, Label = def.Label });
+        }
+    }
+
+    void DropCoinMaybe(double x, double y, double chance, int value)
+    {
+        if (rng.NextDouble() < chance)
+            coinPickups.Add(new CoinPickup { X = x, Y = y, Vy = 55, Value = value });
+    }
+
+    void SpawnExplosion(double x, double y, ExplosionSize size)
+    {
+        explosions.Add(new Explosion { X = x, Y = y, Size = size });
+        _ = PlaySfx(rng.Next(2) == 0 ? "sfx_explosion_1.wav" : "sfx_explosion_2.wav", size == ExplosionSize.Large ? 0.9 : 0.6);
+    }
+
+    void StealTargetItem(Enemy en)
+    {
+        var target = items.FirstOrDefault(i => i.Id == en.TargetItemId && i.Safe);
+        if (target == null)
+        {
+            // its assigned item got stolen by another thief first -- grab any other safe item instead
+            var fallback = items.Where(i => i.Safe).ToList();
+            if (fallback.Count == 0) return;
+            target = fallback[rng.Next(fallback.Count)];
+        }
+        target.Safe = false;
+        en.StolenItemId = target.Id;
+        Toast(StealLines.TryGetValue(target.Id, out var line) ? line : $"They stole {target.Name}!");
+        if (items.All(i => !i.Safe)) EndGame(items: true);
+    }
+
+    void Hurt()
+    {
+        if (invulnT > 0 || shieldT > 0) return;
+        lives -= 1;
+        invulnT = 1300;
+        hitFlashT = 220;
+        _ = PlaySfx("sfx_hit.wav");
+        if (lives <= 0) EndGame(items: false);
+    }
+
+    void ApplyPowerup(PowerUp p)
+    {
+        switch (p.Key)
+        {
+            case "rapid": rapidT = 6000; break;
+            case "wide": wideT = 7000; break;
+            case "shield": shieldT = 5000; break;
+            case "life": lives = Math.Min(lives + 1, 5); break;
+            case "flame": flameT = 6500; break;
+        }
+        Toast($"{p.Icon} {p.Label}!");
+        _ = PlaySfx("sfx_powerup.wav");
+    }
+
+    void Toast(string msg)
+    {
+        toastMsg = msg;
+        toastCts?.Cancel();
+        toastCts = new CancellationTokenSource();
+        var token = toastCts.Token;
+        _ = Task.Delay(1600, token).ContinueWith(t =>
+        {
+            if (!t.IsCanceled)
+            {
+                toastMsg = "";
+                _ = InvokeAsync(StateHasChanged);
+            }
+        }, TaskScheduler.Default);
+    }
+
+    CancellationTokenSource? bannerCts;
+    void WaveBanner(string msg)
+    {
+        waveBannerMsg = msg;
+        bannerCts?.Cancel();
+        bannerCts = new CancellationTokenSource();
+        var token = bannerCts.Token;
+        _ = Task.Delay(2200, token).ContinueWith(t =>
+        {
+            if (!t.IsCanceled)
+            {
+                waveBannerMsg = "";
+                _ = InvokeAsync(StateHasChanged);
+            }
+        }, TaskScheduler.Default);
+    }
+
+    void EndGame(bool items)
+    {
+        screen = ScreenState.End;
+        loopCts?.Cancel();
+        _ = PlayMusic("music_lose.mp3");
+        if (items)
+        {
+            endTitle = "THE FARM IS GONE 👽";
+            endMsg = "Every last thing got beamed into space — including his wife. Ted is currently filing a very strange police report.";
+        }
+        else
+        {
+            endTitle = "GAME OVER";
+            int remaining = this.items.Count(i => i.Safe);
+            endMsg = remaining == ItemDefs.Length
+                ? "You went down swinging, but at least the farm's still intact. Barely."
+                : $"You held onto {remaining} of {ItemDefs.Length} things before the aliens got you. Ted appreciates the effort.";
+        }
+
+        isNewBest = score > Progress.BestScore;
+        if (isNewBest) Progress.BestScore = score;
+        Progress.TotalCoins += coinsThisRun;
+        _ = Progress.SaveAsync(JS);
+    }
+
+    async Task TogglePause()
+    {
+        paused = !paused;
+        if (paused) await PauseMusic(); else await ResumeMusic();
+    }
+
+    async Task QuitToMenu()
+    {
+        loopCts?.Cancel();
+        paused = false;
+        Progress.TotalCoins += coinsThisRun;
+        await Progress.SaveAsync(JS);
+        screen = ScreenState.Start;
+        await PlayMusic("music_intro.mp3");
+    }
+
+    async Task GoToShop()
+    {
+        screen = ScreenState.Shop;
+        await PlayMusic("music_shop.mp3");
+    }
+
+    async Task BackToStart()
+    {
+        screen = ScreenState.Start;
+        await PlayMusic("music_intro.mp3");
+    }
+
+    async Task BuyUpgrade(string key)
+    {
+        int level = Progress.LevelFor(key);
+        if (level >= GameProgress.MaxLevel) return;
+        int cost = GameProgress.CostFor(key, level);
+        if (Progress.TotalCoins < cost) return;
+        Progress.TotalCoins -= cost;
+        Progress.SetLevel(key, level + 1);
+        await Progress.SaveAsync(JS);
+    }
+
+    public void Dispose()
+    {
+        loopCts?.Cancel();
+        toastCts?.Cancel();
+        bannerCts?.Cancel();
+    }
+}

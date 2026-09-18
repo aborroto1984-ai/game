@@ -1,0 +1,56 @@
+namespace AlienFarmHeist.Models;
+
+/// <summary>
+/// Maps game entities to their PNG sprite under wwwroot/images.
+/// Swap any file in wwwroot/images to change art without touching game code.
+/// </summary>
+public static class Sprites
+{
+    public const string Farmer = "images/farmer.png";
+    public const string FarmerFlame = "images/farmer_flame.png";
+    public const string UfoFighter = "images/ufo_fighter.png";
+    public const string UfoThief = "images/ufo_thief.png";
+    public const string UfoElite = "images/ufo_elite.png";
+    public const string UfoBoss = "images/ufo_boss.png";
+    public const string Coin = "images/coin.png";
+    public const string Background = "images/background.png";
+    public const string Cover = "images/cover.jpg";
+    public const string ShopBackground = "images/shop_bg.jpg";
+    public const string FxSmallExplosion = "images/fx_small_explosion.png";
+    public const string FxMediumExplosion = "images/fx_medium_explosion.png";
+    public const string FxLargeExplosion = "images/fx_large_explosion.png";
+    public const string FxContinuousFire = "images/fx_continuous_fire.png";
+    public const string FxBeamColumn = "images/fx_beam_column.png";
+    public const string FxBeamFocus = "images/fx_beam_focus.png";
+
+    public static string ForUpgrade(string key) => key switch
+    {
+        "life" => "images/upgrade_life.png",
+        "fireRate" => "images/upgrade_firerate.png",
+        "speed" => "images/upgrade_speed.png",
+        "powerup" => "images/upgrade_powerup.png",
+        _ => "",
+    };
+
+    public static string ForItem(string id) => id switch
+    {
+        "cow" => "images/cow.png",
+        "chicken" => "images/chicken.png",
+        "tractor" => "images/tractor.png",
+        "truck" => "images/truck.png",
+        "corn" => "images/corn.png",
+        "pumpkin" => "images/pumpkin.png",
+        "wife" => "images/wife.png",
+        _ => "",
+    };
+
+    public static string ForPower(string key) => key switch
+    {
+        "rapid" => "images/power_rapid.png",
+        "wide" => "images/power_wide.png",
+        "shield" => "images/power_shield.png",
+        "life" => "images/power_life.png",
+        "flame" => FxContinuousFire,
+        _ => "",
+    };
+}
