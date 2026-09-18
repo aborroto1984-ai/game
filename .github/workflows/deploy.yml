@@ -11,6 +11,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,24 +19,30 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.419'
 
-      - name: Install wasm-tools workload (required for AOT compilation)
-        run: dotnet workload install wasm-tools
+      - name: Force .NET 8 SDK
+        run: |
+          dotnet new globaljson --sdk-version 8.0.419 --force
+          dotnet --version
+
+      - name: Restore workloads
+        run: dotnet workload restore AlienFarmHeist.csproj
+
+      - name: Restore
+        run: dotnet restore AlienFarmHeist.csproj
 
       - name: Publish
-        run: dotnet publish AlienFarmHeist.csproj -c Release -o release --nologo
+        run: dotnet publish AlienFarmHeist.csproj -c Release -o release --no-restore --nologo
 
-      # GitHub Pages serves this repo at /<repo-name>/, so the app's
-      # <base href="/" /> needs to become <base href="/<repo-name>/" />
       - name: Fix base href for GitHub Pages
         run: |
           sed -i 's#<base href="/" />#<base href="/${{ github.event.repository.name }}/" />#g' release/wwwroot/index.html
 
-      - name: Add .nojekyll (stops GitHub Pages ignoring _framework folder)
+      - name: Add .nojekyll
         run: touch release/wwwroot/.nojekyll
 
-      - name: Copy index.html to 404.html (keeps deep links working)
+      - name: Copy index.html to 404.html
         run: cp release/wwwroot/index.html release/wwwroot/404.html
 
       - name: Deploy to gh-pages branch
