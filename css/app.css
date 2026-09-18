@@ -121,12 +121,14 @@ html, body {
 }
 
 .bullet {
-  position: absolute;
-  width: 10px; height: 10px;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  z-index: 2;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 2;
 }
 .bullet.player { background: #ffe36b; }
 .bullet.enemy { background: #8bff6b; }
@@ -144,11 +146,13 @@ html, body {
 }
 
 .enemy-wrap {
-  position: absolute;
-  width: 54px; height: 54px;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  z-index: 2;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 54px;
+    height: 54px;
+    pointer-events: none;
+    z-index: 2;
 }
 .ufo-sprite { position: absolute; inset: 0; }
 .ufo-sprite.thief { filter: drop-shadow(0 0 5px rgba(226,72,58,.85)); }
@@ -257,11 +261,13 @@ html, body {
 }
 
 .farmer {
-  position: absolute;
-  width: 34px; height: 76px;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  z-index: 2;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 34px;
+    height: 76px;
+    pointer-events: none;
+    z-index: 2;
 }
 .farmer.shielded {
   filter: drop-shadow(0 0 6px #78c8ff) drop-shadow(0 0 10px #78c8ff);
