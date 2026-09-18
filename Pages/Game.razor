@@ -148,7 +148,7 @@
     int score, lives;
 
     double farmerX = W / 2, farmerTargetX = W / 2;
-    double farmerY = H - 72;
+    double farmerY = H - 130;
     bool keyLeft, keyRight;
 
     double fireTimer, fireRate = 300;
@@ -298,7 +298,7 @@
         pixiReady = true;
     }
 
-    const double ItemFieldY = H * 0.76;
+    const double ItemFieldY = H * 0.72;
     const double BeamHoverY = H * 0.50;
     const double BeamDuration = 1300;
 
@@ -468,7 +468,7 @@
                 fireTimer = 55;
                 if (bullets.Count < MaxPlayerBullets)
                 {
-                    double fy = farmerY - 18;
+                    double fy = farmerY - 38;
                     for (int s = 0; s < 2; s++)
                     {
                         double spread = (rng.NextDouble() - 0.5) * 0.32;
@@ -491,7 +491,7 @@
                 fireTimer = rate;
                 if (bullets.Count < MaxPlayerBullets)
                 {
-                    double fy = farmerY - 18;
+                    double fy = farmerY - 38;
                     if (wideT > 0)
                     {
                         bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0, Vy = -0.42 });
@@ -692,11 +692,12 @@
             }
         }
 
+        // collisions: coins vs farmer
         for (int i = coinPickups.Count - 1; i >= 0; i--)
         {
             var c = coinPickups[i];
             double dx = c.X - farmerX, dy = c.Y - farmerY;
-            if (dx * dx + dy * dy < 31 * 31)
+            if (dx * dx + dy * dy < 42 * 42)
             {
                 coinPickups.RemoveAt(i);
                 coinsThisRun += c.Value;
@@ -704,33 +705,36 @@
             }
         }
 
+        // collisions: enemy bullets vs farmer
         for (int i = enemyBullets.Count - 1; i >= 0; i--)
         {
             var b = enemyBullets[i];
             double dx = b.X - farmerX, dy = b.Y - farmerY;
-            if (dx * dx + dy * dy < 14 * 14)
+            if (dx * dx + dy * dy < 20 * 20)
             {
                 enemyBullets.RemoveAt(i);
                 Hurt();
             }
         }
 
+        // collisions: enemy body vs farmer
         for (int i = enemies.Count - 1; i >= 0; i--)
         {
             var en = enemies[i];
             double dx = en.X - farmerX, dy = en.Y - farmerY;
-            if (dx * dx + dy * dy < 31 * 31)
+            if (dx * dx + dy * dy < 42 * 42)
             {
                 enemies.RemoveAt(i);
                 Hurt();
             }
         }
 
+        // collisions: powerups vs farmer
         for (int i = powerups.Count - 1; i >= 0; i--)
         {
             var p = powerups[i];
             double dx = p.X - farmerX, dy = p.Y - farmerY;
-            if (dx * dx + dy * dy < 31 * 31)
+            if (dx * dx + dy * dy < 42 * 42)
             {
                 powerups.RemoveAt(i);
                 ApplyPowerup(p);

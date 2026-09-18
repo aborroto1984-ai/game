@@ -178,8 +178,8 @@ window.alienFarmPixi = (function () {
     function createFarmer() {
         farmer = new PIXI.Sprite(textures.farmer);
         farmer.anchor.set(0.5);
-        farmer.width = 34;
-        farmer.height = 76;
+        farmer.width = 51;   // 34 * 1.5
+        farmer.height = 114; // 76 * 1.5
         playerLayer.addChild(farmer);
     }
 
