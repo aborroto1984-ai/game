@@ -223,8 +223,10 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // 1. Initialize the items list first!
         items = ItemDefs.Select(d => new FarmItem { Id = d.Id, Name = d.Name, Safe = true }).ToList();
 
+        // 2. Map explicit X positions
         var xPositions = new Dictionary<string, double>
         {
             ["cow"] = 50,
@@ -234,6 +236,7 @@
             ["truck"] = 320,
             ["corn"] = 380,
             ["pumpkin"] = 430,
+            
         };
 
         foreach (var item in items)
@@ -242,10 +245,11 @@
                 item.FieldX = customX;
         }
 
+        // 3. Position background decor relative to item positions
         double cornX = items.First(i => i.Id == "corn").FieldX;
         double pumpkinX = items.First(i => i.Id == "pumpkin").FieldX;
 
-        decor.Clear();
+        decor.Clear(); // Clear existing entries if restarting
         decor.Add(new() { Image = "images/corn_plant.png", X = cornX - 18, Y = ItemFieldY - 95, W = 22, H = 66 });
         decor.Add(new() { Image = "images/corn_plant.png", X = cornX + 19, Y = ItemFieldY - 88, W = 20, H = 60 });
 
@@ -701,6 +705,7 @@
             }
         }
 
+        // collisions: coins vs farmer
         for (int i = coinPickups.Count - 1; i >= 0; i--)
         {
             var c = coinPickups[i];
@@ -713,6 +718,7 @@
             }
         }
 
+        // collisions: enemy bullets vs farmer
         for (int i = enemyBullets.Count - 1; i >= 0; i--)
         {
             var b = enemyBullets[i];
@@ -724,6 +730,7 @@
             }
         }
 
+        // collisions: enemy body vs farmer
         for (int i = enemies.Count - 1; i >= 0; i--)
         {
             var en = enemies[i];
@@ -735,6 +742,7 @@
             }
         }
 
+        // collisions: powerups vs farmer
         for (int i = powerups.Count - 1; i >= 0; i--)
         {
             var p = powerups[i];
@@ -972,99 +980,72 @@
         bannerCts?.Cancel();
     }
 
-    private readonly float[] frameBuffer = new float[512];
-
     async ValueTask PushPixiFrameAsync()
     {
-        if (!pixiReady) return;
+        if (!pixiReady)
+            return;
 
-        int ptr = 0;
-
-        // 1. Farmer: [x, y, flame, flash]
-        frameBuffer[ptr++] = (float)farmerX;
-        frameBuffer[ptr++] = (float)farmerY;
-        frameBuffer[ptr++] = flameT > 0 ? 1f : 0f;
-        frameBuffer[ptr++] = (invulnT > 0 && flashOn) ? 1f : 0f;
-
-        // 2. Bullets: [count, id, x, y, isFlame, ...]
-        frameBuffer[ptr++] = bullets.Count;
-        foreach (var b in bullets)
+        var frame = new
         {
-            frameBuffer[ptr++] = b.Id.GetHashCode();
-            frameBuffer[ptr++] = (float)b.X;
-            frameBuffer[ptr++] = (float)b.Y;
-            frameBuffer[ptr++] = b.IsFlame ? 1f : 0f;
-        }
+            Farmer = new
+            {
+                X = (float)farmerX,
+                Y = (float)farmerY,
+                Flame = flameT > 0,
+                Flash = invulnT > 0 && flashOn
+            },
 
-        // 3. Enemy Bullets: [count, id, x, y, ...]
-        frameBuffer[ptr++] = enemyBullets.Count;
-        foreach (var eb in enemyBullets)
-        {
-            frameBuffer[ptr++] = eb.Id.GetHashCode();
-            frameBuffer[ptr++] = (float)eb.X;
-            frameBuffer[ptr++] = (float)eb.Y;
-        }
+            Bullets = bullets
+                .SelectMany(b => new float[] { b.Id.GetHashCode(), (float)b.X, (float)b.Y, b.IsFlame ? 1f : 0f })
+                .ToArray(),
 
-        // 4. Enemies: [count, id, x, y, hp, maxHp, type, isBeaming, targetItemIdx, beamProgress, ...]
-        frameBuffer[ptr++] = enemies.Count;
-        foreach (var en in enemies)
-        {
-            bool isBeaming = en.Type == EnemyType.Thief && en.State == EnemyState.Beaming;
-            int targetItemIdx = isBeaming && en.TargetItemId != null ? Array.FindIndex(ItemDefs, d => d.Id == en.TargetItemId) : -1;
+            EnemyBullets = enemyBullets
+                .SelectMany(b => new float[] { b.Id.GetHashCode(), (float)b.X, (float)b.Y })
+                .ToArray(),
 
-            frameBuffer[ptr++] = en.Id.GetHashCode();
-            frameBuffer[ptr++] = (float)en.X;
-            frameBuffer[ptr++] = (float)en.Y;
-            frameBuffer[ptr++] = en.Hp;
-            frameBuffer[ptr++] = en.MaxHp;
-            frameBuffer[ptr++] = (float)en.Type;
-            frameBuffer[ptr++] = isBeaming ? 1f : 0f;
-            frameBuffer[ptr++] = targetItemIdx;
-            frameBuffer[ptr++] = isBeaming ? (float)Math.Min(1, en.BeamElapsed / BeamDuration) : 0f;
-        }
+            Enemies = enemies
+                .Select(en => new
+                {
+                    Id = en.Id.GetHashCode(),
+                    X = (float)en.X,
+                    Y = (float)en.Y,
+                    en.Hp,
+                    en.MaxHp,
+                    Type = (float)en.Type,
+                    IsBeaming = en.Type == EnemyType.Thief && en.State == EnemyState.Beaming,
+                    TargetItemId = en.TargetItemId, // Pass which farm item is being stolen
+                    BeamProgress = en.State == EnemyState.Beaming
+                        ? (float)Math.Min(1, en.BeamElapsed / BeamDuration)
+                        : 0f
+                })
+                .ToArray(),
 
-        // 5. Ground Items: [count, itemIndex, x, y, ...]
-        var safeItems = items.Where(i => i.Safe && !IsBeingBeamed(i.Id)).ToList();
-        frameBuffer[ptr++] = safeItems.Count;
-        foreach (var item in safeItems)
-        {
-            int itemIdx = Array.FindIndex(ItemDefs, d => d.Id == item.Id);
-            frameBuffer[ptr++] = itemIdx;
-            frameBuffer[ptr++] = (float)item.FieldX;
-            frameBuffer[ptr++] = (float)ItemFieldY;
-        }
+            // Only render ground items if they are safe AND not actively being beamed up
+            Items = items
+                .Where(i => i.Safe && !IsBeingBeamed(i.Id))
+                .Select(i => new { i.Id, X = (float)i.FieldX, Y = (float)ItemFieldY })
+                .ToArray(),
 
-        // 6. Coins: [count, id, x, y, ...]
-        frameBuffer[ptr++] = coinPickups.Count;
-        foreach (var c in coinPickups)
-        {
-            frameBuffer[ptr++] = c.Id.GetHashCode();
-            frameBuffer[ptr++] = (float)c.X;
-            frameBuffer[ptr++] = (float)c.Y;
-        }
+            Powerups = powerups
+                .Select(p => new { Id = p.Id.GetHashCode(), p.Key, X = (float)p.X, Y = (float)p.Y })
+                .ToArray(),
 
-        // 7. Powerups: [count, id, keyIndex, x, y, ...]
-        frameBuffer[ptr++] = powerups.Count;
-        foreach (var p in powerups)
-        {
-            int keyIdx = Array.FindIndex(PowerupDefs, d => d.Key == p.Key);
-            frameBuffer[ptr++] = p.Id.GetHashCode();
-            frameBuffer[ptr++] = keyIdx;
-            frameBuffer[ptr++] = (float)p.X;
-            frameBuffer[ptr++] = (float)p.Y;
-        }
+            Coins = coinPickups
+                .SelectMany(c => new float[] { c.Id.GetHashCode(), (float)c.X, (float)c.Y })
+                .ToArray(),
 
-        // 8. Explosions: [count, id, x, y, size, progress, ...]
-        frameBuffer[ptr++] = explosions.Count;
-        foreach (var ex in explosions)
-        {
-            frameBuffer[ptr++] = ex.Id.GetHashCode();
-            frameBuffer[ptr++] = (float)ex.X;
-            frameBuffer[ptr++] = (float)ex.Y;
-            frameBuffer[ptr++] = (float)ex.Size;
-            frameBuffer[ptr++] = (float)Math.Min(1, ex.Age / Explosion.Lifetime);
-        }
+            Explosions = explosions
+                .SelectMany(ex => new float[]
+                {
+                ex.Id.GetHashCode(),
+                (float)ex.X,
+                (float)ex.Y,
+                (float)ex.Size,
+                (float)Math.Min(1, ex.Age / Explosion.Lifetime)
+                })
+                .ToArray()
+        };
 
-        await JS.InvokeVoidAsync("alienFarmPixi.syncFlat", frameBuffer, ptr);
+        await JS.InvokeVoidAsync("alienFarmPixi.sync", frame);
     }
 }

@@ -89,19 +89,7 @@ window.alienFarmPixi = (function () {
     const explosionMap = new Map();
 
     const bulletPool = [];
-    const itemKeys = ["cow", "chicken", "tractor", "truck", "corn", "pumpkin", "wife"];
-    const powerupKeys = ["rapid", "wide", "shield", "life", "flame"];
     const enemyTypes = ["Fighter", "Thief", "Elite", "Boss"];
-
-    const itemBaseWidths = {
-        chicken: 50,
-        corn: 28,
-        pumpkin: 30,
-        cow: 60,
-        wife: 36,
-        truck: 80,
-        tractor: 70
-    };
 
     let playerBulletContext = null;
     let flameBulletContext = null;
@@ -115,10 +103,8 @@ window.alienFarmPixi = (function () {
             getComputedStyle(document.documentElement).getPropertyValue('--game-scale')
         ) || 1;
 
-        // Cap mobile render resolution to 1.0 to eliminate Mobile Safari GPU fill-rate lag
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
         const pixelRatio = window.devicePixelRatio || 1;
-        const renderResolution = isMobile ? 1.0 : Math.min(pixelRatio * stageScale, 1.5);
+        const renderResolution = Math.min(pixelRatio * stageScale, 1.5);
 
         await app.init({
             canvas: canvas,
@@ -192,8 +178,8 @@ window.alienFarmPixi = (function () {
     function createFarmer() {
         farmer = new PIXI.Sprite(textures.farmer);
         farmer.anchor.set(0.5);
-        farmer.width = 51;
-        farmer.height = 114;
+        farmer.width = 51;   // 34 * 1.5
+        farmer.height = 114; // 76 * 1.5
         playerLayer.addChild(farmer);
     }
 
@@ -209,11 +195,13 @@ window.alienFarmPixi = (function () {
     function createEnemy(data) {
         const root = new PIXI.Container();
 
+        // Tractor beam sprite
         const beam = new PIXI.Sprite(textures.beamColumn);
         beam.anchor.set(0.5, 0);
         beam.visible = false;
         root.addChild(beam);
 
+        // Rising stolen item sprite (inside beam)
         const risingItem = new PIXI.Sprite();
         risingItem.anchor.set(0.5);
         risingItem.width = 28;
@@ -260,6 +248,7 @@ window.alienFarmPixi = (function () {
             node.hp.y = -35;
         }
 
+        // --- Tractor Beam & Rising Stolen Item ---
         if (data.isBeaming) {
             const beamStartY = 25;
             node.beam.visible = true;
@@ -273,16 +262,19 @@ window.alienFarmPixi = (function () {
             const pulse = (Math.sin(performance.now() / 110) + 1) / 2;
             node.beam.alpha = 0.7 + pulse * 0.3;
 
+            // Render Stolen Item Rising Up Beam
             if (data.targetItemId && textures.items[data.targetItemId]) {
                 node.risingItem.visible = true;
                 const tex = textures.items[data.targetItemId];
                 node.risingItem.texture = tex;
 
-                const targetWidth = (itemBaseWidths[data.targetItemId] || 36) * 0.85;
+                // Apply independent sizing & aspect ratio to the rising item
+                const targetWidth = (itemBaseWidths[data.targetItemId] || 36) * 0.85; // Slightly shrink on beam
                 const ratio = (tex.height && tex.width) ? (tex.height / tex.width) : 1;
                 node.risingItem.width = targetWidth;
                 node.risingItem.height = targetWidth * ratio;
 
+                // Quadratic ease curve so the item accelerates upwards into the ship
                 const easedProgress = data.beamProgress * data.beamProgress;
                 const currentOffsetY = totalBeamHeight * (1 - easedProgress);
 
@@ -312,90 +304,47 @@ window.alienFarmPixi = (function () {
         return bullet;
     }
 
-    function syncFlat(buf, totalLen) {
-        if (!ready || !buf || totalLen === 0) return;
+    function syncBulletsFlat(map, list, isEnemy) {
+        if (!list) return;
+        const seen = new Set();
+        const stride = isEnemy ? 3 : 4;
 
-        let ptr = 0;
+        for (let i = 0; i < list.length; i += stride) {
+            const id = String(list[i]);
+            const x = list[i + 1];
+            const y = list[i + 2];
+            const isFlame = !isEnemy && list[i + 3] === 1;
 
-        // 1. Farmer
-        const farmerX = buf[ptr++];
-        const farmerY = buf[ptr++];
-        const flameOn = buf[ptr++] === 1;
-        const flashOn = buf[ptr++] === 1;
+            seen.add(id);
 
-        farmer.visible = true;
-        farmer.position.set(farmerX, farmerY);
-        farmer.texture = flameOn ? textures.farmerFlame : textures.farmer;
-        farmer.alpha = flashOn ? 0.35 : 1;
-
-        // 2. Bullets
-        const bulletCount = buf[ptr++];
-        const seenBullets = new Set();
-        for (let i = 0; i < bulletCount; i++) {
-            const id = String(buf[ptr++]);
-            const x = buf[ptr++];
-            const y = buf[ptr++];
-            const isFlame = buf[ptr++] === 1;
-
-            seenBullets.add(id);
-            let b = playerBullets.get(id);
-            if (!b) {
-                b = createBullet(isFlame, false);
-                playerBullets.set(id, b);
+            let bullet = map.get(id);
+            if (!bullet) {
+                bullet = createBullet(isFlame, isEnemy);
+                map.set(id, bullet);
             }
-            b.position.set(x, y);
-        }
-        for (const [id, b] of playerBullets) {
-            if (!seenBullets.has(id)) {
-                projectileLayer.removeChild(b);
-                b.visible = false;
-                bulletPool.push(b);
-                playerBullets.delete(id);
-            }
+
+            bullet.position.set(x, y);
         }
 
-        // 3. Enemy Bullets
-        const enemyBulletCount = buf[ptr++];
-        const seenEnemyBullets = new Set();
-        for (let i = 0; i < enemyBulletCount; i++) {
-            const id = String(buf[ptr++]);
-            const x = buf[ptr++];
-            const y = buf[ptr++];
-
-            seenEnemyBullets.add(id);
-            let b = enemyBullets.get(id);
-            if (!b) {
-                b = createBullet(false, true);
-                enemyBullets.set(id, b);
-            }
-            b.position.set(x, y);
-        }
-        for (const [id, b] of enemyBullets) {
-            if (!seenEnemyBullets.has(id)) {
-                projectileLayer.removeChild(b);
-                b.visible = false;
-                bulletPool.push(b);
-                enemyBullets.delete(id);
+        for (const [id, bullet] of map) {
+            if (!seen.has(id)) {
+                projectileLayer.removeChild(bullet);
+                bullet.visible = false;
+                bulletPool.push(bullet);
+                map.delete(id);
             }
         }
+    }
 
-        // 4. Enemies
-        const enemyCount = buf[ptr++];
-        const seenEnemies = new Set();
-        for (let i = 0; i < enemyCount; i++) {
-            const id = String(buf[ptr++]);
-            const x = buf[ptr++];
-            const y = buf[ptr++];
-            const hp = buf[ptr++];
-            const maxHp = buf[ptr++];
-            const typeIdx = buf[ptr++];
-            const isBeaming = buf[ptr++] === 1;
-            const targetItemIdx = buf[ptr++];
-            const beamProgress = buf[ptr++];
+    function syncEnemies(list) {
+        if (!list || !Array.isArray(list)) return;
+        const seen = new Set();
 
-            const typeStr = enemyTypes[typeIdx] || "Fighter";
-            const targetItemId = targetItemIdx >= 0 ? itemKeys[targetItemIdx] : null;
-            seenEnemies.add(id);
+        for (const en of list) {
+            const id = String(en.id);
+            const typeStr = enemyTypes[en.type] || "Fighter";
+
+            seen.add(id);
 
             let node = enemies.get(id);
             if (!node) {
@@ -404,74 +353,92 @@ window.alienFarmPixi = (function () {
             }
 
             updateEnemy(node, {
-                x: x,
-                y: y,
-                hp: hp,
-                maxHp: maxHp,
+                x: en.x,
+                y: en.y,
+                hp: en.hp,
+                maxHp: en.maxHp,
                 type: typeStr,
-                isBeaming: isBeaming,
-                targetItemId: targetItemId,
-                beamProgress: beamProgress
+                isBeaming: en.isBeaming,
+                targetItemId: en.targetItemId,
+                beamProgress: en.beamProgress || 0
             });
         }
+
         for (const [id, node] of enemies) {
-            if (!seenEnemies.has(id)) {
+            if (!seen.has(id)) {
                 enemyLayer.removeChild(node.root);
                 node.root.destroy({ children: true });
                 enemies.delete(id);
             }
         }
+    }
 
-        // 5. Items
-        const itemCount = buf[ptr++];
-        const seenItems = new Set();
-        for (let i = 0; i < itemCount; i++) {
-            const itemIdx = buf[ptr++];
-            const x = buf[ptr++];
-            const y = buf[ptr++];
-            const itemKey = itemKeys[itemIdx] || "corn";
+    // Custom base sizes (width in pixels) for each item
+    const itemBaseWidths = {
+        chicken: 50,
+        corn: 28,
+        pumpkin: 30,
+        cow: 60,
+        wife: 36,
+        truck: 80,
+        tractor: 70
+    };
 
-            seenItems.add(itemKey);
-            let sprite = farmItems.get(itemKey);
+    function syncItems(list) {
+        if (!list || !Array.isArray(list)) return;
+        const seen = new Set();
+
+        for (let i = 0; i < list.length; i++) {
+            const item = list[i];
+            if (!item || !item.id) continue;
+
+            seen.add(item.id);
+            let sprite = farmItems.get(item.id);
 
             if (!sprite) {
-                const tex = textures.items ? textures.items[itemKey] : null;
+                const tex = textures.items ? textures.items[item.id] : null;
                 if (tex) {
                     sprite = new PIXI.Sprite(tex);
                     sprite.anchor.set(0.5);
 
-                    const targetWidth = itemBaseWidths[itemKey] || 36;
+                    // Look up custom target width, defaulting to 36 if unlisted
+                    const targetWidth = itemBaseWidths[item.id] || 36;
                     const ratio = (tex.height && tex.width) ? (tex.height / tex.width) : 1;
 
                     sprite.width = targetWidth;
-                    sprite.height = targetWidth * ratio;
+                    sprite.height = targetWidth * ratio; // Maintains true aspect ratio
 
                     itemLayer.addChild(sprite);
-                    farmItems.set(itemKey, sprite);
+                    farmItems.set(item.id, sprite);
                 }
             }
 
             if (sprite) {
-                sprite.position.set(x, y);
+                sprite.position.set(item.x, item.y);
             }
         }
+
         for (const [id, sprite] of farmItems) {
-            if (!seenItems.has(id)) {
+            if (!seen.has(id)) {
                 itemLayer.removeChild(sprite);
                 sprite.destroy();
                 farmItems.delete(id);
             }
         }
+    }
 
-        // 6. Coins
-        const coinCount = buf[ptr++];
-        const seenCoins = new Set();
-        for (let i = 0; i < coinCount; i++) {
-            const id = String(buf[ptr++]);
-            const x = buf[ptr++];
-            const y = buf[ptr++];
+    function syncCoinsFlat(list) {
+        if (!list) return;
+        const seen = new Set();
+        const stride = 3;
 
-            seenCoins.add(id);
+        for (let i = 0; i < list.length; i += stride) {
+            const id = String(list[i]);
+            const x = list[i + 1];
+            const y = list[i + 2];
+
+            seen.add(id);
+
             let sprite = coinMap.get(id);
             if (!sprite) {
                 const tex = textures.items ? textures.items["coin"] : null;
@@ -486,30 +453,32 @@ window.alienFarmPixi = (function () {
                 pickupLayer.addChild(sprite);
                 coinMap.set(id, sprite);
             }
+
             sprite.position.set(x, y);
         }
+
         for (const [id, sprite] of coinMap) {
-            if (!seenCoins.has(id)) {
+            if (!seen.has(id)) {
                 pickupLayer.removeChild(sprite);
                 sprite.destroy();
                 coinMap.delete(id);
             }
         }
+    }
 
-        // 7. Powerups
-        const powerupCount = buf[ptr++];
-        const seenPowerups = new Set();
-        for (let i = 0; i < powerupCount; i++) {
-            const id = String(buf[ptr++]);
-            const keyIdx = buf[ptr++];
-            const x = buf[ptr++];
-            const y = buf[ptr++];
-            const pKey = powerupKeys[keyIdx] || "rapid";
+    function syncPowerups(list) {
+        if (!list || !Array.isArray(list)) return;
+        const seen = new Set();
 
-            seenPowerups.add(id);
-            let sprite = powerupMap.get(id);
+        for (let i = 0; i < list.length; i++) {
+            const p = list[i];
+            if (!p || !p.id) continue;
+
+            seen.add(p.id);
+            let sprite = powerupMap.get(p.id);
+
             if (!sprite) {
-                const tex = textures.items ? textures.items[pKey] : null;
+                const tex = textures.items ? textures.items[p.key] : null;
                 if (tex) {
                     sprite = new PIXI.Sprite(tex);
                 } else {
@@ -519,34 +488,40 @@ window.alienFarmPixi = (function () {
                 sprite.width = 28;
                 sprite.height = 28;
                 pickupLayer.addChild(sprite);
-                powerupMap.set(id, sprite);
+                powerupMap.set(p.id, sprite);
             }
-            sprite.position.set(x, y);
+
+            sprite.position.set(p.x, p.y);
         }
+
         for (const [id, sprite] of powerupMap) {
-            if (!seenPowerups.has(id)) {
+            if (!seen.has(id)) {
                 pickupLayer.removeChild(sprite);
                 sprite.destroy();
                 powerupMap.delete(id);
             }
         }
+    }
 
-        // 8. Explosions
-        const explosionCount = buf[ptr++];
-        const seenExplosions = new Set();
-        for (let i = 0; i < explosionCount; i++) {
-            const id = String(buf[ptr++]);
-            const x = buf[ptr++];
-            const y = buf[ptr++];
-            const sizeIdx = buf[ptr++];
-            const progress = buf[ptr++];
+    function syncExplosionsFlat(list) {
+        if (!list) return;
+        const seen = new Set();
+        const stride = 5; // [id, x, y, sizeIndex, progress]
 
-            seenExplosions.add(id);
+        for (let i = 0; i < list.length; i += stride) {
+            const id = String(list[i]);
+            const x = list[i + 1];
+            const y = list[i + 2];
+            const sizeIndex = list[i + 3];
+            const progress = list[i + 4];
+
+            seen.add(id);
+
             let sprite = explosionMap.get(id);
             if (!sprite) {
                 let tex = textures.exSmall;
-                if (sizeIdx === 1) tex = textures.exMedium;
-                if (sizeIdx === 2) tex = textures.exLarge;
+                if (sizeIndex === 1) tex = textures.exMedium;
+                if (sizeIndex === 2) tex = textures.exLarge;
 
                 sprite = new PIXI.Sprite(tex);
                 sprite.anchor.set(0.5);
@@ -555,9 +530,10 @@ window.alienFarmPixi = (function () {
             }
 
             let baseWidth = 60;
-            if (sizeIdx === 1) baseWidth = 100;
-            if (sizeIdx === 2) baseWidth = 160;
+            if (sizeIndex === 1) baseWidth = 100;
+            if (sizeIndex === 2) baseWidth = 160;
 
+            // Preserve native aspect ratio so sprites don't get squished or stretched
             const ratio = (sprite.texture && sprite.texture.width > 0)
                 ? (sprite.texture.height / sprite.texture.width)
                 : 1;
@@ -566,17 +542,39 @@ window.alienFarmPixi = (function () {
             const targetWidth = baseWidth * scale;
 
             sprite.width = targetWidth;
-            sprite.height = targetWidth * ratio;
+            sprite.height = targetWidth * ratio; // Proportional height
             sprite.alpha = 1 - progress;
             sprite.position.set(x, y);
         }
+
         for (const [id, sprite] of explosionMap) {
-            if (!seenExplosions.has(id)) {
+            if (!seen.has(id)) {
                 explosionLayer.removeChild(sprite);
                 sprite.destroy();
                 explosionMap.delete(id);
             }
         }
+    }
+
+    function sync(frame) {
+        if (!ready || !frame) return;
+
+        if (frame.farmer) {
+            farmer.visible = true;
+            farmer.position.set(frame.farmer.x, frame.farmer.y);
+            farmer.texture = frame.farmer.flame ? textures.farmerFlame : textures.farmer;
+            farmer.alpha = frame.farmer.flash ? 0.35 : 1;
+        } else {
+            farmer.visible = false;
+        }
+
+        syncBulletsFlat(playerBullets, frame.bullets, false);
+        syncBulletsFlat(enemyBullets, frame.enemyBullets, true);
+        syncEnemies(frame.enemies);
+        syncItems(frame.items);
+        syncCoinsFlat(frame.coins);
+        syncPowerups(frame.powerups);
+        syncExplosionsFlat(frame.explosions);
     }
 
     function clear() {
@@ -596,7 +594,7 @@ window.alienFarmPixi = (function () {
         farmer.visible = false;
     }
 
-    return { init, sync: syncFlat, syncFlat, clear };
+    return { init, sync, clear };
 })();
 
 
