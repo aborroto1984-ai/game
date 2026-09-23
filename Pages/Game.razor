@@ -26,6 +26,9 @@
         <div class="pill">⭐ @score</div>
         <div class="pill">🪙 @coinsThisRun</div>
         <div class="pill">🏠 @items.Count(i => i.Safe)/@items.Count</div>
+        <div class="pill">
+            🦃 @(wobbleRageT > 0 ? "RAGE!" : $"{(int)wobbleRageMeter}%")
+        </div>
         <div class="pill">@Hearts()</div>
     </div>
 
@@ -61,7 +64,7 @@
         <div class="side" @onpointerdown="() => SetKey(false, true)" @onpointerup="() => SetKey(false, false)" @onpointerleave="() => SetKey(false, false)"></div>
     </div>
 
-    @if (screen == ScreenState.Start)
+    @if (!loading && screen == ScreenState.Start)
     {
         <div class="overlay start-overlay">
             <div class="progress-strip">
@@ -161,6 +164,42 @@
     double farmerX = W / 2, farmerTargetX = W / 2;
     double farmerY = H - 130;
     bool keyLeft, keyRight;
+
+    // Wobble
+    double wobbleX = W / 2 - 55;
+    double wobbleY = H - 75;
+
+    double wobbleFireTimer;
+    double wobbleEggTimer;
+    double wobbleAnimTimer;
+    double wobbleSoundTimer;
+
+    int wobbleFrame;
+    int wobbleFollowSide = -1;
+    int wobbleRageDirection = 1;
+
+    double wobbleRageMeter;
+    double wobbleRageT;
+
+    const double WobbleRageMoveSpeed = 0.72;
+
+    const double WobbleRageDuration = 6000;
+    const double WobbleMaxRage = 100;
+
+    const int MaxWobbleShots = 30;
+
+    const double WobbleFollowDistance = 52;
+    const double WobbleFollowYOffset = 35;
+
+    const double WobbleNormalFireRate = 700;
+    const double WobbleRageFireRate = 150;
+
+    const double WobbleNormalEggRate = 10000;
+    const double WobbleRageEggRate = 2400;
+
+    List<WobbleShot> wobbleShots = new();
+    List<WobbleEgg> wobbleEggs = new();
+    List<WobbleEggBlast> wobbleEggBlasts = new();
 
     double fireTimer, fireRate = 300;
     double flameSfxTimer;
@@ -295,6 +334,18 @@
                     Farmer = Sprites.Farmer,
                     FarmerFlame = Sprites.FarmerFlame,
 
+                    WobbleStanding = Sprites.WobbleStanding,
+                    WobbleLeftLeg = Sprites.WobbleLeftLeg,
+                    WobbleRightLeg = Sprites.WobbleRightLeg,
+
+                    WobbleStandingRage = Sprites.WobbleStandingRage,
+                    WobbleLeftLegRage = Sprites.WobbleLeftLegRage,
+                    WobbleRightLegRage = Sprites.WobbleRightLegRage,
+
+                    WobbleKernel = Sprites.WobbleKernel,
+                    WobbleEgg = Sprites.WobbleEgg,
+                    WobbleEggExplosion = Sprites.WobbleEggExplosion,
+
                     UfoFighter = Sprites.UfoFighter,
                     UfoThief = Sprites.UfoThief,
                     UfoElite = Sprites.UfoElite,
@@ -336,6 +387,36 @@
         try { await JS.InvokeVoidAsync("gameAudio.playSfx", $"audio/{file}", volume); } catch { }
     }
 
+    async Task PlayTemporaryMusic(
+    string file,
+    double volume = 0.7,
+    double startAtSeconds = 0)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "gameAudio.playTemporaryMusic",
+                $"audio/{file}",
+                volume,
+                startAtSeconds);
+        }
+        catch
+        {
+        }
+    }
+
+    async Task StopTemporaryMusic()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "gameAudio.stopTemporaryMusic");
+        }
+        catch
+        {
+        }
+    }
+
     static string Px(double v) => v.ToString(CultureInfo.InvariantCulture) + "px";
     static string Num(double v) => v.ToString(CultureInfo.InvariantCulture);
 
@@ -371,26 +452,94 @@
         {
             await pixiInitTask;
         }
-        time = 0; difficulty = 1; score = 0; lives = 4 + Progress.LifeLevel;
-        farmerX = W / 2; farmerTargetX = W / 2;
+
+        // Reset game state
+        time = 0;
+        difficulty = 1;
+        score = 0;
+        lives = 4 + Progress.LifeLevel;
+
+        farmerX = W / 2;
+        farmerTargetX = W / 2;
+
+        // Start Wobble slightly behind and to Ted's left
+        wobbleFollowSide = -1;
+        wobbleRageDirection = 1;
+
+        wobbleX = farmerX - 55;
+        wobbleY = farmerY + 35;
+
+        wobbleFireTimer = 300;
+        wobbleEggTimer = 5000;
+        wobbleAnimTimer = 0;
+        wobbleSoundTimer = 5000 + rng.NextDouble() * 5000;
+
+        wobbleFrame = 0;
+
+        wobbleRageMeter = 0;
+        wobbleRageT = 0;
+
+        wobbleShots.Clear();
+        wobbleEggs.Clear();
+        wobbleEggBlasts.Clear();
+
         keyLeft = keyRight = false;
-        fireTimer = 0; fireRate = Math.Max(210, 300 - Progress.FireRateLevel * 18);
-        moveSpeed = 0.42 + Progress.SpeedLevel * 0.035;
-        spawnTimer = 0; spawnInterval = 1900;
-        shieldT = rapidT = wideT = flameT = invulnT = hitFlashT = 0;
+
+        fireTimer = 0;
+        flameSfxTimer = 0;
+        fireRate = Math.Max(
+            210,
+            300 - Progress.FireRateLevel * 18);
+
+        moveSpeed =
+            0.42 +
+            Progress.SpeedLevel * 0.035;
+
+        spawnTimer = 0;
+        spawnInterval = 1900;
+
+        shieldT = 0;
+        rapidT = 0;
+        wideT = 0;
+        flameT = 0;
+        invulnT = 0;
+        hitFlashT = 0;
+
         explosions.Clear();
-        bullets.Clear(); enemyBullets.Clear(); enemies.Clear(); powerups.Clear(); coinPickups.Clear();
-        foreach (var it in items) it.Safe = true;
-        toastMsg = ""; waveBannerMsg = "";
-        wave = 1; lastWaveTriggered = 1; coinsThisRun = 0; isNewBest = false;
+
+        bullets.Clear();
+        enemyBullets.Clear();
+        enemies.Clear();
+        powerups.Clear();
+        coinPickups.Clear();
+
+        foreach (var it in items)
+        {
+            it.Safe = true;
+        }
+
+        toastMsg = "";
+        waveBannerMsg = "";
+
+        wave = 1;
+        lastWaveTriggered = 1;
+        coinsThisRun = 0;
+        isNewBest = false;
 
         screen = ScreenState.Playing;
+
         StateHasChanged();
-        _ = PlayMusic(rng.Next(2) == 0 ? "music_gameplay_1.mp3" : "music_gameplay_2.mp3");
+
+        _ = PlayMusic(
+            rng.Next(2) == 0
+                ? "music_gameplay_1.mp3"
+                : "music_gameplay_2.mp3");
 
         await PushPixiFrameAsync();
+
         loopCts?.Cancel();
         loopCts = new CancellationTokenSource();
+
         _ = RunLoop(loopCts.Token);
 
         await Task.Delay(1);
@@ -614,6 +763,9 @@
                         en.Y = en.PatrolY;
                         en.State = EnemyState.Beaming;
                         en.BeamElapsed = 0;
+
+                        AddWobbleRage(8);
+
                         _ = PlaySfx("sfx_beam_deploy.wav");
                     }
                 }
@@ -639,6 +791,8 @@
         }
         enemies.RemoveAll(en => en.Y < -80 || en.Y > H + 40);
 
+        UpdateWobble(dt);
+
         foreach (var p in powerups) p.Y += p.Vy * dt / 1000;
         powerups.RemoveAll(p => p.Y > H + 30);
 
@@ -659,47 +813,12 @@
                 if (dx * dx + dy * dy < hitR * hitR)
                 {
                     bullets.RemoveAt(bi);
-                    en.Hp -= 1;
-                    if (en.Hp <= 0)
-                    {
-                        enemies.RemoveAt(ei);
 
-                        if (en.Type == EnemyType.Thief && en.StolenItemId != null)
-                        {
-                            var rescued = items.FirstOrDefault(i => i.Id == en.StolenItemId);
-                            if (rescued != null)
-                            {
-                                rescued.Safe = true;
-                                Toast($"Rescued {rescued.Name}! 🎉");
-                            }
-                        }
+                    DamageEnemy(
+                        ei,
+                        1,
+                        fromWobble: false);
 
-                        switch (en.Type)
-                        {
-                            case EnemyType.Thief:
-                                score += 16;
-                                DropCoinMaybe(en.X, en.Y, 0.25, 1);
-                                SpawnExplosion(en.X, en.Y, ExplosionSize.Small);
-                                break;
-                            case EnemyType.Elite:
-                                score += 25;
-                                DropCoinMaybe(en.X, en.Y, 1.0, 2);
-                                SpawnExplosion(en.X, en.Y, ExplosionSize.Medium);
-                                break;
-                            case EnemyType.Boss:
-                                score += 150;
-                                DropCoinMaybe(en.X, en.Y, 1.0, 12);
-                                WaveBanner("👽 MOTHERSHIP DESTROYED! 👽");
-                                SpawnExplosion(en.X, en.Y, ExplosionSize.Large);
-                                break;
-                            default:
-                                score += 10;
-                                DropCoinMaybe(en.X, en.Y, 0.15, 1);
-                                SpawnExplosion(en.X, en.Y, ExplosionSize.Small);
-                                break;
-                        }
-                        DropPowerupMaybe(en.X, en.Y);
-                    }
                     break;
                 }
             }
@@ -753,6 +872,700 @@
                 ApplyPowerup(p);
             }
         }
+    }
+
+    void UpdateWobble(double dt)
+    {
+        bool raging = wobbleRageT > 0;
+
+        // ---------------------------------
+        // Rage timer
+        // ---------------------------------
+        if (wobbleRageT > 0)
+        {
+            wobbleRageT -= dt;
+
+            if (wobbleRageT <= 0)
+            {
+                wobbleRageT = 0;
+                wobbleRageMeter = 0;
+
+                _ = StopTemporaryMusic();
+            }
+            else
+            {
+                wobbleRageMeter =
+                    WobbleMaxRage *
+                    (wobbleRageT / WobbleRageDuration);
+            }
+        }
+
+        raging = wobbleRageT > 0;
+
+        // ---------------------------------
+        // Movement
+        // ---------------------------------
+
+        double previousX = wobbleX;
+
+        if (raging)
+        {
+            // Wobble has lost his mind.
+            // Ignore Ted and sprint independently across the screen.
+            wobbleX +=
+                wobbleRageDirection *
+                WobbleRageMoveSpeed *
+                dt;
+
+            // Bounce off the edges.
+            if (wobbleX <= 30)
+            {
+                wobbleX = 30;
+                wobbleRageDirection = 1;
+            }
+            else if (wobbleX >= W - 30)
+            {
+                wobbleX = W - 30;
+                wobbleRageDirection = -1;
+            }
+
+            // Keep him around the same combat row,
+            // but give him a little frantic bob.
+            double rageY =
+                farmerY +
+                WobbleFollowYOffset +
+                Math.Sin(time / 55.0) * 6;
+
+            wobbleY +=
+                (rageY - wobbleY) *
+                Math.Min(1, dt / 70);
+        }
+        else
+        {
+            // Normal behavior: trail behind Ted.
+            double tedMovement =
+                farmerTargetX - farmerX;
+
+            if (tedMovement > 2)
+            {
+                wobbleFollowSide = -1;
+            }
+            else if (tedMovement < -2)
+            {
+                wobbleFollowSide = 1;
+            }
+
+            if (farmerX < 70)
+                wobbleFollowSide = 1;
+
+            if (farmerX > W - 70)
+                wobbleFollowSide = -1;
+
+            double desiredX =
+                farmerX +
+                wobbleFollowSide *
+                WobbleFollowDistance;
+
+            desiredX =
+                Math.Clamp(
+                    desiredX,
+                    28,
+                    W - 28);
+
+            double desiredY =
+                farmerY +
+                WobbleFollowYOffset;
+
+            wobbleX +=
+                (desiredX - wobbleX) *
+                Math.Min(1, dt / 180);
+
+            wobbleY +=
+                (desiredY - wobbleY) *
+                Math.Min(1, dt / 180);
+        }
+
+        // ---------------------------------
+        // Walking animation
+        // ---------------------------------
+
+        bool moving =
+            Math.Abs(wobbleX - previousX) > 0.08;
+
+        if (moving)
+        {
+            wobbleAnimTimer += dt;
+
+            double animationRate =
+                raging ? 65 : 120;
+
+            int phase =
+                ((int)(wobbleAnimTimer / animationRate)) % 4;
+
+            wobbleFrame = phase switch
+            {
+                1 => 1, // left leg
+                3 => 2, // right leg
+                _ => 0  // standing
+            };
+        }
+        else
+        {
+            wobbleAnimTimer = 0;
+            wobbleFrame = 0;
+        }
+
+        // ---------------------------------
+        // Find target
+        // ---------------------------------
+
+        Enemy? target =
+            GetWobbleTarget();
+
+        wobbleFireTimer -= dt;
+        wobbleEggTimer -= dt;
+
+        wobbleSoundTimer -= dt;
+
+        if (!raging &&
+            wobbleSoundTimer <= 0)
+        {
+            _ = PlaySfx(
+                "sfx_wobble.mp3",
+                0.55);
+
+            // Anywhere from 8–18 seconds before
+            // he randomly speaks again.
+            wobbleSoundTimer =
+                8000 +
+                rng.NextDouble() * 10000;
+        }
+
+        // ---------------------------------
+        // Kernel gun
+        // ---------------------------------
+
+        if (target != null &&
+            wobbleFireTimer <= 0 &&
+            wobbleShots.Count < MaxWobbleShots)
+        {
+            wobbleFireTimer =
+                raging
+                    ? WobbleRageFireRate
+                    : WobbleNormalFireRate;
+
+            FireWobbleKernel(target);
+        }
+
+        // ---------------------------------
+        // Eggstrike
+        // ---------------------------------
+
+        if (target != null &&
+            wobbleEggTimer <= 0)
+        {
+            // Don't waste eggs on a single normal fighter.
+            bool worthEgg =
+                target.Type != EnemyType.Fighter ||
+                enemies.Count >= 3;
+
+            if (worthEgg)
+            {
+                LaunchWobbleEgg(target);
+
+                wobbleEggTimer =
+                    raging
+                        ? WobbleRageEggRate
+                        : WobbleNormalEggRate;
+            }
+        }
+
+        // ---------------------------------
+        // Move kernels
+        // ---------------------------------
+
+        foreach (var shot in wobbleShots)
+        {
+            shot.X += shot.Vx * dt;
+            shot.Y += shot.Vy * dt;
+        }
+
+        wobbleShots.RemoveAll(s =>
+            s.X < -30 ||
+            s.X > W + 30 ||
+            s.Y < -30 ||
+            s.Y > H + 30);
+
+        // ---------------------------------
+        // Kernel collisions
+        // ---------------------------------
+
+        for (int shotIndex = wobbleShots.Count - 1;
+             shotIndex >= 0;
+             shotIndex--)
+        {
+            var shot = wobbleShots[shotIndex];
+
+            for (int enemyIndex = enemies.Count - 1;
+                 enemyIndex >= 0;
+                 enemyIndex--)
+            {
+                var enemy = enemies[enemyIndex];
+
+                double hitRadius =
+                    enemy.Type == EnemyType.Boss
+                        ? 55
+                        : 26;
+
+                double dx =
+                    shot.X - enemy.X;
+
+                double dy =
+                    shot.Y - enemy.Y;
+
+                if (dx * dx + dy * dy <
+                    hitRadius * hitRadius)
+                {
+                    wobbleShots.RemoveAt(shotIndex);
+
+                    DamageEnemy(
+                        enemyIndex,
+                        shot.Damage,
+                        fromWobble: true);
+
+                    break;
+                }
+            }
+        }
+
+        // ---------------------------------
+        // Move eggs
+        // ---------------------------------
+
+        for (int i = wobbleEggs.Count - 1;
+             i >= 0;
+             i--)
+        {
+            var egg = wobbleEggs[i];
+
+            egg.X += egg.Vx * dt;
+            egg.Y += egg.Vy * dt;
+
+            egg.Rotation += dt * 0.012;
+            egg.Age += dt;
+
+            bool hitEnemy =
+                enemies.Any(enemy =>
+                {
+                    double enemyRadius =
+                        enemy.Type == EnemyType.Boss
+                            ? 55
+                            : 26;
+
+                    double dx =
+                        enemy.X - egg.X;
+
+                    double dy =
+                        enemy.Y - egg.Y;
+
+                    double radius =
+                        enemyRadius + 10;
+
+                    return dx * dx + dy * dy <
+                           radius * radius;
+                });
+
+            bool expired =
+                egg.Age >= 1800 ||
+                egg.X < -40 ||
+                egg.X > W + 40 ||
+                egg.Y < -40 ||
+                egg.Y > H + 40;
+
+            if (hitEnemy || expired)
+            {
+                wobbleEggs.RemoveAt(i);
+
+                ExplodeWobbleEgg(
+                    egg.X,
+                    egg.Y,
+                    egg.Damage);
+            }
+        }
+
+        // ---------------------------------
+        // Explosion animation lifetime
+        // ---------------------------------
+
+        foreach (var blast in wobbleEggBlasts)
+        {
+            blast.Age += dt;
+        }
+
+        wobbleEggBlasts.RemoveAll(
+            blast =>
+                blast.Age >=
+                WobbleEggBlast.Lifetime);
+    }
+
+    void FireWobbleKernel(Enemy target)
+    {
+        double startX = wobbleX;
+
+        // Approximate height of his weapon.
+        double startY = wobbleY - 50;
+
+        double dx =
+            target.X - startX;
+
+        double dy =
+            target.Y - startY;
+
+        double distance =
+            Math.Sqrt(
+                dx * dx +
+                dy * dy);
+
+        if (distance <= 0.001)
+            return;
+
+        bool raging =
+            wobbleRageT > 0;
+
+        double speed =
+            raging
+                ? 0.60
+                : 0.48;
+
+        wobbleShots.Add(
+            new WobbleShot
+            {
+                X = startX,
+                Y = startY,
+
+                Vx = dx / distance * speed,
+                Vy = dy / distance * speed,
+
+                Damage =
+                    raging
+                        ? 2
+                        : 1
+            });
+    }
+
+    void LaunchWobbleEgg(Enemy target)
+    {
+        double startX = wobbleX;
+        double startY = wobbleY - 42;
+
+        double dx =
+            target.X - startX;
+
+        double dy =
+            target.Y - startY;
+
+        double distance =
+            Math.Sqrt(
+                dx * dx +
+                dy * dy);
+
+        if (distance <= 0.001)
+            return;
+
+        const double speed = 0.40;
+
+        wobbleEggs.Add(
+            new WobbleEgg
+            {
+                X = startX,
+                Y = startY,
+
+                Vx = dx / distance * speed,
+                Vy = dy / distance * speed,
+
+                Damage =
+                    wobbleRageT > 0
+                        ? 4
+                        : 2
+            });
+    }
+
+    void ExplodeWobbleEgg(
+    double x,
+    double y,
+    int damage)
+    {
+        wobbleEggBlasts.Add(
+            new WobbleEggBlast
+            {
+                X = x,
+                Y = y
+            });
+
+        _ = PlaySfx(
+            rng.Next(2) == 0
+                ? "sfx_explosion_1.wav"
+                : "sfx_explosion_2.wav",
+            0.7);
+
+        const double blastRadius = 60;
+
+        double blastRadiusSquared =
+            blastRadius * blastRadius;
+
+        // Walk backwards because DamageEnemy()
+        // is allowed to remove enemies.
+        for (int i = enemies.Count - 1;
+             i >= 0;
+             i--)
+        {
+            var enemy =
+                enemies[i];
+
+            double dx =
+                enemy.X - x;
+
+            double dy =
+                enemy.Y - y;
+
+            if (dx * dx + dy * dy <=
+                blastRadiusSquared)
+            {
+                DamageEnemy(
+                    i,
+                    damage,
+                    fromWobble: true);
+            }
+        }
+    }
+
+    void DamageEnemy(
+    int enemyIndex,
+    int damage,
+    bool fromWobble)
+    {
+        if (enemyIndex < 0 ||
+            enemyIndex >= enemies.Count)
+            return;
+
+        var enemy =
+            enemies[enemyIndex];
+
+        enemy.Hp -= damage;
+
+        // ---------------------------------
+        // Wobble-specific effects
+        // ---------------------------------
+
+        if (fromWobble)
+        {
+            AddWobbleRage(
+                damage * 1.5);
+
+            // His specialty:
+            // make alien abductions take longer.
+            if (enemy.Type == EnemyType.Thief &&
+                enemy.State == EnemyState.Beaming)
+            {
+                double beamPushback =
+                    wobbleRageT > 0
+                        ? 220
+                        : 110;
+
+                enemy.BeamElapsed =
+                    Math.Max(
+                        0,
+                        enemy.BeamElapsed -
+                        beamPushback);
+            }
+        }
+
+        if (enemy.Hp > 0)
+            return;
+
+        // ---------------------------------
+        // Enemy died
+        // ---------------------------------
+
+        enemies.RemoveAt(enemyIndex);
+
+        if (enemy.Type == EnemyType.Thief &&
+            enemy.StolenItemId != null)
+        {
+            var rescued =
+                items.FirstOrDefault(
+                    item =>
+                        item.Id ==
+                        enemy.StolenItemId);
+
+            if (rescued != null)
+            {
+                rescued.Safe = true;
+
+                Toast(
+                    fromWobble
+                        ? $"Wobble rescued {rescued.Name}! 🦃"
+                        : $"Rescued {rescued.Name}! 🎉");
+            }
+        }
+
+        switch (enemy.Type)
+        {
+            case EnemyType.Thief:
+
+                score += 16;
+
+                DropCoinMaybe(
+                    enemy.X,
+                    enemy.Y,
+                    0.25,
+                    1);
+
+                SpawnExplosion(
+                    enemy.X,
+                    enemy.Y,
+                    ExplosionSize.Small);
+
+                AddWobbleRage(5);
+
+                break;
+
+            case EnemyType.Elite:
+
+                score += 25;
+
+                DropCoinMaybe(
+                    enemy.X,
+                    enemy.Y,
+                    1.0,
+                    2);
+
+                SpawnExplosion(
+                    enemy.X,
+                    enemy.Y,
+                    ExplosionSize.Medium);
+
+                AddWobbleRage(4);
+
+                break;
+
+            case EnemyType.Boss:
+
+                score += 150;
+
+                DropCoinMaybe(
+                    enemy.X,
+                    enemy.Y,
+                    1.0,
+                    12);
+
+                WaveBanner(
+                    "👽 MOTHERSHIP DESTROYED! 👽");
+
+                SpawnExplosion(
+                    enemy.X,
+                    enemy.Y,
+                    ExplosionSize.Large);
+
+                AddWobbleRage(15);
+
+                break;
+
+            default:
+
+                score += 10;
+
+                DropCoinMaybe(
+                    enemy.X,
+                    enemy.Y,
+                    0.15,
+                    1);
+
+                SpawnExplosion(
+                    enemy.X,
+                    enemy.Y,
+                    ExplosionSize.Small);
+
+                AddWobbleRage(2);
+
+                break;
+        }
+
+        DropPowerupMaybe(
+            enemy.X,
+            enemy.Y);
+    }
+
+    Enemy? GetWobbleTarget()
+    {
+        return enemies
+            .Where(e =>
+                e.State != EnemyState.Fleeing ||
+                (e.Type == EnemyType.Thief && e.StolenItemId != null))
+            .OrderBy(WobbleTargetPriority)
+            .ThenBy(e =>
+            {
+                double dx = e.X - wobbleX;
+                double dy = e.Y - wobbleY;
+
+                return dx * dx + dy * dy;
+            })
+            .FirstOrDefault();
+    }
+
+    int WobbleTargetPriority(Enemy enemy)
+    {
+        // Somebody is actively stealing the farm.
+        if (enemy.Type == EnemyType.Thief &&
+            enemy.State == EnemyState.Beaming)
+            return 0;
+
+        // A thief already has something. Get it back.
+        if (enemy.Type == EnemyType.Thief &&
+            enemy.StolenItemId != null)
+            return 1;
+
+        // Stop thieves before they reach the farm.
+        if (enemy.Type == EnemyType.Thief)
+            return 2;
+
+        if (enemy.Type == EnemyType.Elite)
+            return 3;
+
+        if (enemy.Type == EnemyType.Boss)
+            return 4;
+
+        return 5;
+    }
+
+    void AddWobbleRage(double amount)
+    {
+        if (wobbleRageT > 0)
+            return;
+
+        wobbleRageMeter = Math.Min(
+            WobbleMaxRage,
+            wobbleRageMeter + amount);
+
+        if (wobbleRageMeter < WobbleMaxRage)
+            return;
+
+        wobbleRageMeter = WobbleMaxRage;
+        wobbleRageT = WobbleRageDuration;
+
+        wobbleFireTimer = 0;
+
+        // Let him throw an egg almost immediately.
+        wobbleEggTimer = Math.Min(
+            wobbleEggTimer,
+            500);
+
+        WaveBanner("🦃 WOBBLE HAS HAD ENOUGH 🦃");
+
+        _ = PlayTemporaryMusic(
+            "sfx_wobble_rage.mp3",
+            0.75,
+            2.0);
     }
 
     void SpawnEnemy()
@@ -856,6 +1669,7 @@
     {
         if (invulnT > 0 || shieldT > 0) return;
         lives -= 1;
+        AddWobbleRage(12);
         invulnT = 1300;
         hitFlashT = 220;
         _ = PlaySfx("sfx_hit.wav");
@@ -994,6 +1808,45 @@
                 Flame = flameT > 0,
                 Flash = invulnT > 0 && flashOn
             },
+
+            Wobble = new
+            {
+                X = (float)wobbleX,
+                Y = (float)wobbleY,
+                Frame = wobbleFrame,
+                Rage = wobbleRageT > 0
+            },
+
+            WobbleShots = wobbleShots
+            .SelectMany(s => new float[]
+            {
+                s.Id.GetHashCode(),
+                (float)s.X,
+                (float)s.Y
+            })
+            .ToArray(),
+
+                    WobbleEggs = wobbleEggs
+            .SelectMany(e => new float[]
+            {
+                e.Id.GetHashCode(),
+                (float)e.X,
+                (float)e.Y,
+                (float)e.Rotation
+            })
+            .ToArray(),
+
+                    WobbleEggBlasts = wobbleEggBlasts
+            .SelectMany(e => new float[]
+            {
+                e.Id.GetHashCode(),
+                (float)e.X,
+                (float)e.Y,
+                (float)Math.Min(
+                    1,
+                    e.Age / WobbleEggBlast.Lifetime)
+            })
+            .ToArray(),
 
             Bullets = bullets
                 .SelectMany(b => new float[] { b.Id.GetHashCode(), (float)b.X, (float)b.Y, b.IsFlame ? 1f : 0f })

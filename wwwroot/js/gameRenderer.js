@@ -4,6 +4,10 @@
 window.gameAudio = (function () {
     let musicEl = null;
     let currentMusicSrc = null;
+
+    let temporaryMusicEl = null;
+
+    let musicPaused = false;
     let unlockArmed = false;
 
     const POOL_SIZE = 8;
@@ -24,27 +28,156 @@ window.gameAudio = (function () {
     }
 
     function playMusic(src, volume) {
-        if (currentMusicSrc === src && musicEl && !musicEl.paused) return;
-        if (musicEl) { musicEl.pause(); }
+        // A normal music change should kill any temporary track.
+        if (temporaryMusicEl) {
+            temporaryMusicEl.pause();
+            temporaryMusicEl.currentTime = 0;
+            temporaryMusicEl = null;
+        }
+
+        musicPaused = false;
+
+        if (currentMusicSrc === src && musicEl) {
+            musicEl.volume = volume ?? 0.5;
+
+            if (musicEl.paused) {
+                musicEl.play().catch(() => {
+                    armUnlockRetry();
+                });
+            }
+
+            return;
+        }
+
+        if (musicEl) {
+            musicEl.pause();
+        }
+
         musicEl = new Audio(src);
         musicEl.loop = true;
         musicEl.volume = volume ?? 0.5;
+
         currentMusicSrc = src;
-        musicEl.play().catch(() => { armUnlockRetry(); });
+
+        musicEl.play().catch(() => {
+            armUnlockRetry();
+        });
     }
+
+
+    function playTemporaryMusic(src, volume, startAtSeconds = 0) {
+        if (temporaryMusicEl) {
+            temporaryMusicEl.pause();
+            temporaryMusicEl.currentTime = 0;
+        }
+
+        // Pause the normal gameplay music without losing its position.
+        if (musicEl && !musicEl.paused) {
+            musicEl.pause();
+        }
+
+        const tempAudio = new Audio(src);
+
+        tempAudio.loop = true;
+        tempAudio.volume = volume ?? 0.7;
+
+        temporaryMusicEl = tempAudio;
+
+        const startPlayback = () => {
+            // Make sure this is still the active temporary track.
+            if (temporaryMusicEl !== tempAudio) {
+                return;
+            }
+
+            if (startAtSeconds > 0) {
+                tempAudio.currentTime = startAtSeconds;
+            }
+
+            if (!musicPaused) {
+                tempAudio.play().catch(() => {
+                    armUnlockRetry();
+                });
+            }
+        };
+
+        // We need metadata loaded before reliably seeking.
+        if (tempAudio.readyState >= 1) {
+            startPlayback();
+        }
+        else {
+            tempAudio.addEventListener(
+                "loadedmetadata",
+                startPlayback,
+                { once: true }
+            );
+
+            tempAudio.load();
+        }
+    }
+
+
+    function stopTemporaryMusic() {
+        if (temporaryMusicEl) {
+            temporaryMusicEl.pause();
+            temporaryMusicEl.currentTime = 0;
+            temporaryMusicEl = null;
+        }
+
+        // Resume the original background song
+        // from exactly where it was paused.
+        if (musicEl && !musicPaused) {
+            musicEl.play().catch(() => {
+                armUnlockRetry();
+            });
+        }
+    }
+
 
     function stopMusic() {
-        if (musicEl) { musicEl.pause(); }
+        if (musicEl) {
+            musicEl.pause();
+            musicEl.currentTime = 0;
+        }
+
+        if (temporaryMusicEl) {
+            temporaryMusicEl.pause();
+            temporaryMusicEl.currentTime = 0;
+        }
+
         musicEl = null;
+        temporaryMusicEl = null;
         currentMusicSrc = null;
+        musicPaused = false;
     }
+
 
     function pauseMusic() {
-        if (musicEl) musicEl.pause();
+        musicPaused = true;
+
+        if (musicEl) {
+            musicEl.pause();
+        }
+
+        if (temporaryMusicEl) {
+            temporaryMusicEl.pause();
+        }
     }
 
+
     function resumeMusic() {
-        if (musicEl) musicEl.play().catch(() => { armUnlockRetry(); });
+        musicPaused = false;
+
+        // Rage music takes priority if it exists.
+        if (temporaryMusicEl) {
+            temporaryMusicEl.play().catch(() => {
+                armUnlockRetry();
+            });
+        }
+        else if (musicEl) {
+            musicEl.play().catch(() => {
+                armUnlockRetry();
+            });
+        }
     }
 
     function playSfx(src, volume) {
@@ -58,7 +191,15 @@ window.gameAudio = (function () {
         audio.play().catch(() => { });
     }
 
-    return { playMusic, stopMusic, pauseMusic, resumeMusic, playSfx };
+    return {
+        playMusic,
+        playTemporaryMusic,
+        stopTemporaryMusic,
+        stopMusic,
+        pauseMusic,
+        resumeMusic,
+        playSfx
+    };
 })();
 
 
@@ -78,7 +219,13 @@ window.alienFarmPixi = (function () {
     let playerLayer = null;
 
     let farmer = null;
+    let wobble = null;
+
     let textures = {};
+
+    const wobbleShots = new Map();
+    const wobbleEggs = new Map();
+    const wobbleEggBlasts = new Map();
 
     const playerBullets = new Map();
     const enemyBullets = new Map();
@@ -129,6 +276,8 @@ window.alienFarmPixi = (function () {
         app.stage.addChild(itemLayer, enemyLayer, projectileLayer, pickupLayer, explosionLayer, playerLayer);
 
         createSharedBulletGeometry();
+
+        createWobble();
         createFarmer();
 
         ready = true;
@@ -153,14 +302,30 @@ window.alienFarmPixi = (function () {
         textures = {
             farmer: texture(assets.farmer),
             farmerFlame: texture(assets.farmerFlame),
+
+            wobbleStanding: texture(assets.wobbleStanding),
+            wobbleLeftLeg: texture(assets.wobbleLeftLeg),
+            wobbleRightLeg: texture(assets.wobbleRightLeg),
+
+            wobbleStandingRage: texture(assets.wobbleStandingRage),
+            wobbleLeftLegRage: texture(assets.wobbleLeftLegRage),
+            wobbleRightLegRage: texture(assets.wobbleRightLegRage),
+
+            wobbleKernel: texture(assets.wobbleKernel),
+            wobbleEgg: texture(assets.wobbleEgg),
+            wobbleEggExplosion: texture(assets.wobbleEggExplosion),
+
             ufoFighter: texture(assets.ufoFighter),
             ufoThief: texture(assets.ufoThief),
             ufoElite: texture(assets.ufoElite),
             ufoBoss: texture(assets.ufoBoss),
+
             beamColumn: texture(assets.beamColumn),
+
             exSmall: texture("images/fx_small_explosion.png"),
             exMedium: texture("images/fx_medium_explosion.png"),
             exLarge: texture("images/fx_large_explosion.png"),
+
             items: {}
         };
 
@@ -181,6 +346,88 @@ window.alienFarmPixi = (function () {
         farmer.width = 51;   // 34 * 1.5
         farmer.height = 114; // 76 * 1.5
         playerLayer.addChild(farmer);
+    }
+
+    function createWobble() {
+        wobble = new PIXI.Sprite(
+            textures.wobbleStanding
+        );
+
+        // Bottom-center anchor keeps his feet planted while textures change.
+        wobble.anchor.set(0.5, 1);
+
+        const targetWidth = 58;
+
+        const ratio =
+            wobble.texture.height /
+            wobble.texture.width || 1;
+
+        wobble.width = targetWidth;
+        wobble.height = targetWidth * ratio;
+
+        playerLayer.addChild(wobble);
+    }
+
+    function getWobbleTexture(frame, rage) {
+        if (rage) {
+            switch (frame) {
+                case 1:
+                    return textures.wobbleLeftLegRage;
+
+                case 2:
+                    return textures.wobbleRightLegRage;
+
+                default:
+                    return textures.wobbleStandingRage;
+            }
+        }
+
+        switch (frame) {
+            case 1:
+                return textures.wobbleLeftLeg;
+
+            case 2:
+                return textures.wobbleRightLeg;
+
+            default:
+                return textures.wobbleStanding;
+        }
+    }
+
+    function syncWobble(data) {
+        if (!wobble) return;
+
+        if (!data) {
+            wobble.visible = false;
+            return;
+        }
+
+        wobble.visible = true;
+
+        wobble.position.set(
+            data.x,
+            data.y
+        );
+
+        wobble.texture =
+            getWobbleTexture(
+                data.frame,
+                data.rage
+            );
+
+        // Slightly larger when raging.
+        const targetWidth =
+            data.rage
+                ? 62
+                : 58;
+
+        const ratio =
+            wobble.texture.height /
+            wobble.texture.width || 1;
+
+        wobble.width = targetWidth;
+        wobble.height =
+            targetWidth * ratio;
     }
 
     function enemyTexture(type) {
@@ -556,20 +803,244 @@ window.alienFarmPixi = (function () {
         }
     }
 
+    function syncWobbleShots(list) {
+        if (!list) return;
+
+        const seen = new Set();
+        const stride = 3;
+
+        for (let i = 0; i < list.length; i += stride) {
+            const id = String(list[i]);
+            const x = list[i + 1];
+            const y = list[i + 2];
+
+            seen.add(id);
+
+            let sprite = wobbleShots.get(id);
+
+            if (!sprite) {
+                sprite =
+                    new PIXI.Sprite(
+                        textures.wobbleKernel
+                    );
+
+                sprite.anchor.set(0.5);
+
+                const targetWidth = 12;
+
+                const ratio =
+                    sprite.texture.height /
+                    sprite.texture.width || 1;
+
+                sprite.width = targetWidth;
+                sprite.height =
+                    targetWidth * ratio;
+
+                projectileLayer.addChild(sprite);
+
+                wobbleShots.set(
+                    id,
+                    sprite
+                );
+            }
+
+            sprite.position.set(x, y);
+        }
+
+        for (const [id, sprite] of wobbleShots) {
+            if (!seen.has(id)) {
+                projectileLayer.removeChild(sprite);
+                sprite.destroy();
+
+                wobbleShots.delete(id);
+            }
+        }
+    }
+
+    function syncWobbleEggs(list) {
+        if (!list) return;
+
+        const seen = new Set();
+        const stride = 4;
+
+        for (let i = 0; i < list.length; i += stride) {
+            const id = String(list[i]);
+            const x = list[i + 1];
+            const y = list[i + 2];
+            const rotation = list[i + 3];
+
+            seen.add(id);
+
+            let sprite = wobbleEggs.get(id);
+
+            if (!sprite) {
+                sprite = new PIXI.Sprite(
+                    textures.wobbleEgg
+                );
+
+                sprite.anchor.set(0.5);
+
+                const targetWidth = 22;
+
+                const ratio =
+                    sprite.texture.height /
+                    sprite.texture.width || 1;
+
+                sprite.width = targetWidth;
+                sprite.height =
+                    targetWidth * ratio;
+
+                projectileLayer.addChild(sprite);
+
+                wobbleEggs.set(
+                    id,
+                    sprite
+                );
+            }
+
+            sprite.position.set(x, y);
+            sprite.rotation = rotation;
+        }
+
+        for (const [id, sprite] of wobbleEggs) {
+            if (!seen.has(id)) {
+                projectileLayer.removeChild(sprite);
+                sprite.destroy();
+
+                wobbleEggs.delete(id);
+            }
+        }
+    }
+
+
+    function syncWobbleEggBlasts(list) {
+        if (!list) return;
+
+        const seen = new Set();
+        const stride = 4;
+
+        for (let i = 0; i < list.length; i += stride) {
+            const id = String(list[i]);
+            const x = list[i + 1];
+            const y = list[i + 2];
+            const progress = list[i + 3];
+
+            seen.add(id);
+
+            let sprite =
+                wobbleEggBlasts.get(id);
+
+            if (!sprite) {
+                sprite = new PIXI.Sprite(
+                    textures.wobbleEggExplosion
+                );
+
+                sprite.anchor.set(0.5);
+
+                explosionLayer.addChild(sprite);
+
+                wobbleEggBlasts.set(
+                    id,
+                    sprite
+                );
+            }
+
+            const baseWidth = 110;
+
+            const scale =
+                0.45 +
+                progress * 0.75;
+
+            const targetWidth =
+                baseWidth * scale;
+
+            const ratio =
+                sprite.texture.height /
+                sprite.texture.width || 1;
+
+            sprite.width = targetWidth;
+            sprite.height =
+                targetWidth * ratio;
+
+            sprite.alpha =
+                1 - progress;
+
+            sprite.position.set(
+                x,
+                y
+            );
+        }
+
+        for (const [id, sprite] of wobbleEggBlasts) {
+            if (!seen.has(id)) {
+                explosionLayer.removeChild(sprite);
+                sprite.destroy();
+
+                wobbleEggBlasts.delete(id);
+            }
+        }
+    }
+
     function sync(frame) {
         if (!ready || !frame) return;
 
+        // -----------------------------
+        // Ted
+        // -----------------------------
         if (frame.farmer) {
             farmer.visible = true;
-            farmer.position.set(frame.farmer.x, frame.farmer.y);
-            farmer.texture = frame.farmer.flame ? textures.farmerFlame : textures.farmer;
-            farmer.alpha = frame.farmer.flash ? 0.35 : 1;
-        } else {
+
+            farmer.position.set(
+                frame.farmer.x,
+                frame.farmer.y
+            );
+
+            farmer.texture =
+                frame.farmer.flame
+                    ? textures.farmerFlame
+                    : textures.farmer;
+
+            farmer.alpha =
+                frame.farmer.flash
+                    ? 0.35
+                    : 1;
+        }
+        else {
             farmer.visible = false;
         }
 
-        syncBulletsFlat(playerBullets, frame.bullets, false);
-        syncBulletsFlat(enemyBullets, frame.enemyBullets, true);
+        // -----------------------------
+        // Wobble
+        // -----------------------------
+        syncWobble(frame.wobble);
+
+        syncWobbleShots(
+            frame.wobbleShots
+        );
+
+        syncWobbleEggs(
+            frame.wobbleEggs
+        );
+
+        syncWobbleEggBlasts(
+            frame.wobbleEggBlasts
+        );
+
+        // -----------------------------
+        // Existing game entities
+        // -----------------------------
+        syncBulletsFlat(
+            playerBullets,
+            frame.bullets,
+            false
+        );
+
+        syncBulletsFlat(
+            enemyBullets,
+            frame.enemyBullets,
+            true
+        );
+
         syncEnemies(frame.enemies);
         syncItems(frame.items);
         syncCoinsFlat(frame.coins);
@@ -579,19 +1050,76 @@ window.alienFarmPixi = (function () {
 
     function clear() {
         if (!ready) return;
+
+        // -----------------------------
+        // Enemies
+        // -----------------------------
         enemies.forEach(node => {
             enemyLayer.removeChild(node.root);
-            node.root.destroy({ children: true });
+
+            node.root.destroy({
+                children: true
+            });
         });
+
         enemies.clear();
 
-        playerBullets.forEach(b => projectileLayer.removeChild(b));
+        // -----------------------------
+        // Ted bullets
+        // -----------------------------
+        playerBullets.forEach(b => {
+            projectileLayer.removeChild(b);
+        });
+
         playerBullets.clear();
 
-        enemyBullets.forEach(b => projectileLayer.removeChild(b));
+        // -----------------------------
+        // Enemy bullets
+        // -----------------------------
+        enemyBullets.forEach(b => {
+            projectileLayer.removeChild(b);
+        });
+
         enemyBullets.clear();
 
+        // -----------------------------
+        // Wobble kernels
+        // -----------------------------
+        wobbleShots.forEach(sprite => {
+            projectileLayer.removeChild(sprite);
+            sprite.destroy();
+        });
+
+        wobbleShots.clear();
+
+        // -----------------------------
+        // Wobble eggs
+        // -----------------------------
+        wobbleEggs.forEach(sprite => {
+            projectileLayer.removeChild(sprite);
+            sprite.destroy();
+        });
+
+        wobbleEggs.clear();
+
+        // -----------------------------
+        // Wobble egg explosions
+        // -----------------------------
+        wobbleEggBlasts.forEach(sprite => {
+            explosionLayer.removeChild(sprite);
+            sprite.destroy();
+        });
+
+        wobbleEggBlasts.clear();
+
+        // -----------------------------
+        // Players
+        // -----------------------------
         farmer.visible = false;
+
+        if (wobble) {
+            wobble.visible = false;
+        }
     }
 
     return { init, sync, clear };

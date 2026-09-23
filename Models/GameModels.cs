@@ -67,3 +67,44 @@ public class Explosion
     public ExplosionSize Size;
     public const double Lifetime = 500;
 }
+
+public class WobbleShot
+{
+    public Guid Id { get; } = Guid.NewGuid();
+
+    public double X { get; set; }
+    public double Y { get; set; }
+
+    public double Vx { get; set; }
+    public double Vy { get; set; }
+
+    public int Damage { get; set; } = 1;
+}
+
+public class WobbleEgg
+{
+    public Guid Id { get; } = Guid.NewGuid();
+
+    public double X { get; set; }
+    public double Y { get; set; }
+
+    public double Vx { get; set; }
+    public double Vy { get; set; }
+
+    public double Age { get; set; }
+    public double Rotation { get; set; }
+
+    public int Damage { get; set; } = 2;
+}
+
+public class WobbleEggBlast
+{
+    public const double Lifetime = 450;
+
+    public Guid Id { get; } = Guid.NewGuid();
+
+    public double X { get; set; }
+    public double Y { get; set; }
+
+    public double Age { get; set; }
+}

@@ -8,14 +8,30 @@ public static class Sprites
 {
     public const string Farmer = "images/farmer.png";
     public const string FarmerFlame = "images/farmer_flame.png";
+
+    // Wobble
+    public const string WobbleStanding = "images/wobble_standing.png";
+    public const string WobbleLeftLeg = "images/wobble_leftLeg.png";
+    public const string WobbleRightLeg = "images/wobble_rightLeg.png";
+
+    public const string WobbleStandingRage = "images/wobble_standing_rage.png";
+    public const string WobbleLeftLegRage = "images/wobble_leftLeg_rage.png";
+    public const string WobbleRightLegRage = "images/wobble_rightLeg_rage.png";
+
+    public const string WobbleKernel = "images/kernel.png";
+    public const string WobbleEgg = "images/egg.png";
+    public const string WobbleEggExplosion = "images/egg_explosion.png";
+
     public const string UfoFighter = "images/ufo_fighter.png";
     public const string UfoThief = "images/ufo_thief.png";
     public const string UfoElite = "images/ufo_elite.png";
     public const string UfoBoss = "images/ufo_boss.png";
+
     public const string Coin = "images/coin.png";
     public const string Background = "images/background.png";
     public const string Cover = "images/cover.jpg";
     public const string ShopBackground = "images/shop_bg.jpg";
+
     public const string FxSmallExplosion = "images/fx_small_explosion.png";
     public const string FxMediumExplosion = "images/fx_medium_explosion.png";
     public const string FxLargeExplosion = "images/fx_large_explosion.png";
