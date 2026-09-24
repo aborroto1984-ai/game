@@ -481,11 +481,28 @@ window.alienFarmPixi = (function () {
         }
 
         if (data.type === "Boss") {
-            node.sprite.width = 150;
-            node.sprite.height = 100;
-            node.hp.text = data.hp + "/" + data.maxHp;
-            node.hp.y = -62;
-        } else {
+            const targetWidth = 150;
+
+            const ratio =
+                node.sprite.texture.height /
+                node.sprite.texture.width || 1;
+
+            node.sprite.width =
+                targetWidth;
+
+            node.sprite.height =
+                targetWidth * ratio;
+
+            node.hp.text =
+                data.hp +
+                "/" +
+                data.maxHp;
+
+            node.hp.y =
+                -(node.sprite.height / 2) -
+                14;
+        }
+        else {
             const targetWidth = 54;
             const ratio = node.sprite.texture.height / node.sprite.texture.width || 1;
             node.sprite.width = targetWidth;
