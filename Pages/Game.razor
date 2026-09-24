@@ -218,6 +218,7 @@
 
     GameProgress Progress = new();
     int wave = 1, lastWaveTriggered = 1, coinsThisRun = 0;
+    int killsSincePowerup;
     bool isNewBest = false;
     const double WaveDurationMs = 25000;
 
@@ -524,6 +525,7 @@
         wave = 1;
         lastWaveTriggered = 1;
         coinsThisRun = 0;
+        killsSincePowerup = 0;
         isNewBest = false;
 
         screen = ScreenState.Playing;
@@ -595,10 +597,30 @@
     void Update(double dt)
     {
         time += dt;
-        difficulty = 1 + time / 34000.0;
-        spawnInterval = Math.Max(700, 1900 - time / 55);
 
-        int currentWave = 1 + (int)(time / WaveDurationMs);
+        int currentWave =
+            1 + (int)(time / WaveDurationMs);
+
+        double waveProgress =
+            (time % WaveDurationMs) /
+            WaveDurationMs;
+
+        // Smooth difficulty increase both between
+        // and during waves.
+        difficulty =
+            1.0 +
+            (currentWave - 1) * 0.28 +
+            waveProgress * 0.28;
+
+        // Enemies arrive progressively faster.
+        // Wave 1 still gives the player room to learn.
+        spawnInterval =
+            Math.Max(
+                650,
+                1950 -
+                (currentWave - 1) * 140 -
+                waveProgress * 90); 
+
         if (currentWave > lastWaveTriggered)
         {
             lastWaveTriggered = currentWave;
@@ -1577,12 +1599,49 @@
             .ToHashSet();
         var availableTargets = items.Where(i => i.Safe && !alreadyTargeted.Contains(i.Id)).ToList();
 
-        bool isThief = rng.NextDouble() < 0.30 && availableTargets.Count > 0;
-        bool isElite = !isThief && wave >= 3 && rng.NextDouble() < Math.Min(0.35, 0.10 + wave * 0.03);
-        var type = isThief ? EnemyType.Thief : isElite ? EnemyType.Elite : EnemyType.Fighter;
+        double thiefChance =
+            Math.Min(
+                0.38,
+                0.12 + (wave - 1) * 0.03);
 
-        int hp = Math.Min(2 + (int)(difficulty * 0.7) + rng.Next(0, 2), 9);
-        if (isElite) hp += 5;
+        double eliteChance =
+            wave < 3
+                ? 0
+                : Math.Min(
+                    0.30,
+                    0.06 + (wave - 3) * 0.035);
+
+        bool isThief =
+            availableTargets.Count > 0 &&
+            rng.NextDouble() < thiefChance;
+
+        bool isElite =
+            !isThief &&
+            rng.NextDouble() < eliteChance;
+
+        var type =
+            isThief
+                ? EnemyType.Thief
+                : isElite
+                    ? EnemyType.Elite
+                    : EnemyType.Fighter;
+
+        // Regular ships get tougher every couple of waves.
+        int hp =
+            2 +
+            (wave - 1) / 2 +
+            rng.Next(0, 2);
+
+        if (isElite)
+        {
+            hp +=
+                3 +
+                Math.Min(4, wave / 3);
+        }
+
+        hp = Math.Min(
+            hp,
+            isElite ? 14 : 9);
 
         var en = new Enemy
         {
@@ -1627,14 +1686,84 @@
         });
     }
 
-    void DropPowerupMaybe(double x, double y)
+    void DropPowerupMaybe(
+    double x,
+    double y)
     {
-        double chance = Math.Min(0.6, 0.32 + Progress.PowerupLevel * 0.05);
-        if (rng.NextDouble() < chance)
+        killsSincePowerup++;
+
+        // Starts restrained but increases as the
+        // game becomes more dangerous.
+        double chance =
+            0.12 +
+            (wave - 1) * 0.025 +
+            Progress.PowerupLevel * 0.03;
+
+        chance =
+            Math.Min(
+                chance,
+                0.38);
+
+        // Prevent extremely unlucky dry streaks.
+        bool guaranteedDrop =
+            killsSincePowerup >= 7;
+
+        if (!guaranteedDrop &&
+            rng.NextDouble() >= chance)
         {
-            var def = PowerupDefs[rng.Next(PowerupDefs.Length)];
-            powerups.Add(new PowerUp { X = x, Y = y, Vy = 60, Key = def.Key, Icon = def.Icon, Label = def.Label });
+            return;
         }
+
+        killsSincePowerup = 0;
+
+        // Control which powerups appear by stage
+        // and make the strongest ones less common.
+        string[] weightedKeys =
+            wave switch
+            {
+                1 => new[]
+                {
+                "rapid", "rapid",
+                "wide", "wide",
+                "shield", "shield"
+                },
+
+                2 => new[]
+                {
+                "rapid", "rapid",
+                "wide", "wide",
+                "shield", "shield",
+                "life"
+                },
+
+                _ => new[]
+                {
+                "rapid", "rapid",
+                "wide", "wide",
+                "shield", "shield",
+                "life",
+                "flame"
+                }
+            };
+
+        string key =
+            weightedKeys[
+                rng.Next(weightedKeys.Length)];
+
+        var def =
+            PowerupDefs.First(p =>
+                p.Key == key);
+
+        powerups.Add(
+            new PowerUp
+            {
+                X = x,
+                Y = y,
+                Vy = 60,
+                Key = def.Key,
+                Icon = def.Icon,
+                Label = def.Label
+            });
     }
 
     void DropCoinMaybe(double x, double y, double chance, int value)
