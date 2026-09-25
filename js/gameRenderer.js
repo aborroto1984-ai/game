@@ -221,6 +221,12 @@ window.alienFarmPixi = (function () {
     let farmer = null;
     let wobble = null;
 
+    // Latest player pointer position stays entirely
+    // on the JavaScript side until the next existing
+    // Pixi sync call.
+    let inputSurface = null;
+    let pendingPlayerTargetX = null;
+
     let textures = {};
 
     const wobbleShots = new Map();
@@ -246,6 +252,49 @@ window.alienFarmPixi = (function () {
     ];
 
     let enemyBulletContext = null;
+
+    function handlePlayerPointer(event) {
+        if (!config || !inputSurface) {
+            return;
+        }
+
+        // Ignore menus, pause screen, and actual buttons.
+        // We only want gameplay movement.
+        const target = event.target;
+
+        if (
+            target instanceof Element &&
+            target.closest(".overlay, button")
+        ) {
+            return;
+        }
+
+        const rect =
+            inputSurface.getBoundingClientRect();
+
+        if (rect.width <= 0) {
+            return;
+        }
+
+        // Convert browser/CSS coordinates back into
+        // the game's native 480px coordinate system.
+        const gameX =
+            (event.clientX - rect.left) *
+            (config.width / rect.width);
+
+        pendingPlayerTargetX =
+            Math.max(
+                24,
+                Math.min(
+                    config.width - 24,
+                    gameX
+                )
+            );
+    }
+
+    function resetPlayerInput() {
+        pendingPlayerTargetX = null;
+    }
 
     async function init(canvas, options) {
         config = options;
@@ -284,6 +333,24 @@ window.alienFarmPixi = (function () {
 
         createWobble();
         createFarmer();
+
+        // Listen on the stage rather than the canvas itself.
+        // This preserves movement even when the transparent
+        // mobile touch-control elements are above the canvas.
+        inputSurface =
+            canvas.parentElement || canvas;
+
+        inputSurface.addEventListener(
+            "pointerdown",
+            handlePlayerPointer,
+            { passive: true }
+        );
+
+        inputSurface.addEventListener(
+            "pointermove",
+            handlePlayerPointer,
+            { passive: true }
+        );
 
         ready = true;
     }
@@ -1404,6 +1471,16 @@ window.alienFarmPixi = (function () {
         syncPowerups(frame.powerups);
         syncExplosionsFlat(frame.explosions);
         syncBomberBlasts(frame.bomberBlasts);
+
+        // Return the newest pointer position as part of
+        // this existing C# -> JS crossing.
+        const playerTargetX =
+            pendingPlayerTargetX;
+
+        pendingPlayerTargetX = null;
+
+        // -1 means there has been no new pointer movement.
+        return playerTargetX ?? -1;
     }
 
     function clear() {
@@ -1492,7 +1569,12 @@ window.alienFarmPixi = (function () {
         }
     }
 
-    return { init, sync, clear };
+    return {
+        init,
+        sync,
+        clear,
+        resetPlayerInput
+    };
 })();
 
 
