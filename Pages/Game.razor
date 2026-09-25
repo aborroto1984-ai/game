@@ -7,8 +7,7 @@
 
 <div class="stage" tabindex="0" @ref="stageRef"
      @onkeydown="OnKeyDown" @onkeydown:preventDefault
-     @onkeyup="OnKeyUp"
-     @onpointerdown="OnPointerMove" @onpointermove="OnPointerMove">
+     @onkeyup="OnKeyUp">
 
     @if (loading)
     {
@@ -464,15 +463,6 @@
         if (e.Key is "ArrowRight" or "d" or "D") keyRight = false;
     }
 
-    void OnPointerMove(PointerEventArgs e)
-    {
-        if (screen != ScreenState.Playing) return;
-        var x = Math.Max(24, Math.Min(W - 24, e.OffsetX));
-        farmerTargetX = x;
-        keyLeft = false;
-        keyRight = false;
-    }
-
     void SetKey(bool left, bool value)
     {
         if (left) keyLeft = value; else keyRight = value;
@@ -493,6 +483,8 @@
 
         farmerX = W / 2;
         farmerTargetX = W / 2;
+
+        await JS.InvokeVoidAsync("alienFarmPixi.resetPlayerInput");
 
         // Start Wobble slightly behind and to Ted's left
         wobbleFollowSide = -1;
@@ -584,40 +576,77 @@
     {
         var clock = Stopwatch.StartNew();
 
-        double last = clock.Elapsed.TotalMilliseconds;
+        double last =
+            clock.Elapsed.TotalMilliseconds;
+
+        double pixiAccumulator = 0;
         double blazorAccumulator = 0;
 
-        const double FrameMs = 1000.0 / 60.0;
-        const double BlazorFrameMs = 1000.0 / 15.0;
+        // Keep the actual game simulation at 60 Hz.
+        const double SimulationFrameMs =
+            1000.0 / 60.0;
+
+        // Only serialize/send the full Pixi frame at 30 Hz.
+        const double PixiFrameMs =
+            1000.0 / 30.0;
+
+        // HUD / Razor rendering can stay at 15 Hz.
+        const double BlazorFrameMs =
+            1000.0 / 15.0;
 
         while (!token.IsCancellationRequested &&
                screen == ScreenState.Playing)
         {
-            double frameStart = clock.Elapsed.TotalMilliseconds;
+            double frameStart =
+                clock.Elapsed.TotalMilliseconds;
 
-            double dt = Math.Min(frameStart - last, 40);
+            double dt =
+                Math.Min(
+                    frameStart - last,
+                    40);
+
             last = frameStart;
 
             if (!paused)
             {
+                // Gameplay still runs every simulation frame.
                 Update(dt);
-                await PushPixiFrameAsync();
 
+                pixiAccumulator += dt;
                 blazorAccumulator += dt;
 
+                // Full C# -> JS snapshot only 30 times/sec.
+                if (pixiAccumulator >= PixiFrameMs)
+                {
+                    pixiAccumulator %= PixiFrameMs;
+
+                    await PushPixiFrameAsync();
+                }
+
+                // Blazor is only needed for HUD / overlays.
                 if (blazorAccumulator >= BlazorFrameMs)
                 {
                     blazorAccumulator %= BlazorFrameMs;
-                    await InvokeAsync(StateHasChanged);
+
+                    await InvokeAsync(
+                        StateHasChanged);
                 }
             }
 
-            double workTime = clock.Elapsed.TotalMilliseconds - frameStart;
-            int delay = (int)Math.Max(1, FrameMs - workTime);
+            double workTime =
+                clock.Elapsed.TotalMilliseconds -
+                frameStart;
+
+            int delay =
+                (int)Math.Max(
+                    1,
+                    SimulationFrameMs - workTime);
 
             try
             {
-                await Task.Delay(delay, token);
+                await Task.Delay(
+                    delay,
+                    token);
             }
             catch (OperationCanceledException)
             {
@@ -2934,9 +2963,23 @@
                 .ToArray()
         };
 
-        await JS.InvokeVoidAsync(
-            "alienFarmPixi.sync",
-            frame);
+        double pointerTargetX = await JS.InvokeAsync<double>("alienFarmPixi.sync", frame);
+
+        if (pointerTargetX >= 0 &&
+            screen == ScreenState.Playing &&
+            !paused)
+        {
+            farmerTargetX =
+                Math.Clamp(
+                    pointerTargetX,
+                    24,
+                    W - 24);
+
+            // Pointer control takes over from keyboard control,
+            // matching the previous behavior.
+            keyLeft = false;
+            keyRight = false;
+        }
     }
 
     double GetEnemyHitRadius( Enemy enemy)
