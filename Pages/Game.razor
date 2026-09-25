@@ -216,6 +216,11 @@
     List<CoinPickup> coinPickups = new();
     List<FarmItem> items = new();
 
+    List<BomberBlast> bomberBlasts = new();
+
+    const double BomberBlastRadius = 72;
+    const double HarvesterBeamDuration = 2200;
+
     GameProgress Progress = new();
     int wave = 1, lastWaveTriggered = 1, coinsThisRun = 0;
     int killsSincePowerup;
@@ -335,6 +340,9 @@
                     Farmer = Sprites.Farmer,
                     FarmerFlame = Sprites.FarmerFlame,
 
+                    TedBullet = Sprites.TedBullet,
+                    TedFlameBurst = Sprites.TedFlameBurst,
+
                     WobbleStanding = Sprites.WobbleStanding,
                     WobbleLeftLeg = Sprites.WobbleLeftLeg,
                     WobbleRightLeg = Sprites.WobbleRightLeg,
@@ -350,7 +358,21 @@
                     UfoFighter = Sprites.UfoFighter,
                     UfoThief = Sprites.UfoThief,
                     UfoElite = Sprites.UfoElite,
-                    UfoBoss = Sprites.UfoBoss,
+
+                    UfoInterceptor = Sprites.UfoInterceptor,
+                    UfoBomber = Sprites.UfoBomber,
+
+                    UfoBossScout = Sprites.UfoBossScout,
+                    UfoBossHarvester = Sprites.UfoBossHarvester,
+                    UfoBossWar = Sprites.UfoBossWar,
+
+                    InterceptorShot = Sprites.InterceptorShot,
+                    BomberBomb = Sprites.BomberBomb,
+                    BomberBlast = Sprites.BomberBlast,
+
+                    HarvesterBeamEmitter = Sprites.HarvesterBeamEmitter,
+
+                    WarMothershipShot =Sprites.WarMothershipShot,
 
                     BeamColumn = Sprites.FxBeamColumn,
 
@@ -375,7 +397,16 @@
     string Hearts() => lives > 0 ? string.Concat(Enumerable.Repeat("❤️", lives)) : "💀";
 
     bool IsBeingBeamed(string itemId) =>
-        enemies.Any(e => e.Type == EnemyType.Thief && e.State == EnemyState.Beaming && e.TargetItemId == itemId);
+        enemies.Any(e =>
+            e.State == EnemyState.Beaming &&
+            e.TargetItemId == itemId &&
+            (
+                e.Type == EnemyType.Thief ||
+                (
+                    e.Type == EnemyType.Boss &&
+                    e.BossVariant == BossVariant.Harvester
+                )
+            ));
 
     async Task PlayMusic(string file, double volume = 0.5)
     {
@@ -483,6 +514,7 @@
         wobbleShots.Clear();
         wobbleEggs.Clear();
         wobbleEggBlasts.Clear();
+        bomberBlasts.Clear();
 
         keyLeft = keyRight = false;
 
@@ -616,10 +648,10 @@
         // Wave 1 still gives the player room to learn.
         spawnInterval =
             Math.Max(
-                650,
-                1950 -
-                (currentWave - 1) * 140 -
-                waveProgress * 90); 
+                420,
+                1250 -
+                (currentWave - 1) * 95 -
+                waveProgress * 80);
 
         if (currentWave > lastWaveTriggered)
         {
@@ -694,14 +726,68 @@
         foreach (var b in bullets) { b.X += b.Vx * dt; b.Y += b.Vy * dt; }
         bullets.RemoveAll(b => b.Y < -20);
 
-        foreach (var b in enemyBullets) { b.X += b.Vx * dt; b.Y += b.Vy * dt; }
-        enemyBullets.RemoveAll(b => b.Y > H + 20);
+        for (int i = enemyBullets.Count - 1; i >= 0; i--)
+        {
+            var b = enemyBullets[i];
+
+            b.X += b.Vx * dt;
+            b.Y += b.Vy * dt;
+
+            // Bomber bombs explode when they reach Ted's combat row.
+            if (b.EnemyKind ==
+                    EnemyProjectileKind.BomberBomb &&
+                b.Y >= farmerY - 15)
+            {
+                enemyBullets.RemoveAt(i);
+
+                SpawnBomberBlast(
+                    b.X,
+                    b.Y);
+
+                continue;
+            }
+
+            if (b.Y > H + 30 ||
+                b.X < -40 ||
+                b.X > W + 40)
+            {
+                enemyBullets.RemoveAt(i);
+            }
+        }
 
         spawnTimer -= dt;
+
         if (spawnTimer <= 0)
         {
             spawnTimer = spawnInterval;
-            SpawnEnemy();
+
+            int spawnCount = 1;
+
+            // The invasion becomes denser as waves increase.
+            if (wave >= 3 &&
+                rng.NextDouble() < 0.35)
+            {
+                spawnCount++;
+            }
+
+            if (wave >= 6 &&
+                rng.NextDouble() < 0.40)
+            {
+                spawnCount++;
+            }
+
+            if (wave >= 10 &&
+                rng.NextDouble() < 0.30)
+            {
+                spawnCount++;
+            }
+
+            for (int i = 0;
+                 i < spawnCount;
+                 i++)
+            {
+                SpawnEnemy();
+            }
         }
 
         foreach (var en in enemies)
@@ -744,32 +830,17 @@
                         break;
                 }
             }
+            else if (en.Type == EnemyType.Interceptor)
+            {
+                UpdateInterceptor(en, dt);
+            }
+            else if (en.Type == EnemyType.Bomber)
+            {
+                UpdateBomber(en, dt);
+            }
             else if (en.Type == EnemyType.Boss)
             {
-                en.X += Math.Sin(en.Phase * 0.7) * 14 * dt / 1000;
-                en.X = Math.Max(60, Math.Min(W - 60, en.X));
-
-                if (en.State == EnemyState.Descending)
-                {
-                    en.Y += en.Vy * dt / 1000;
-                    if (en.Y >= en.PatrolY)
-                    {
-                        en.Y = en.PatrolY;
-                        en.State = EnemyState.Hovering;
-                    }
-                }
-                else
-                {
-                    en.Y = en.PatrolY + Math.Sin(en.Phase * 1.2) * 6;
-                    en.ShootTimer -= dt;
-                    if (en.ShootTimer <= 0)
-                    {
-                        en.ShootTimer = 1300 + rng.NextDouble() * 400;
-                        if (enemyBullets.Count < MaxEnemyBullets)
-                            for (int s = -1; s <= 1; s++)
-                                enemyBullets.Add(new Bullet { X = en.X, Y = en.Y + 20, Vx = s * 0.10 + (farmerX - en.X) * 0.0004, Vy = 0.19 });
-                    }
-                }
+                UpdateBoss(en, dt);
             }
             else
             {
@@ -824,13 +895,23 @@
         foreach (var ex in explosions) ex.Age += dt;
         explosions.RemoveAll(ex => ex.Age >= Explosion.Lifetime);
 
+        foreach (var blast in bomberBlasts)
+        {
+            blast.Age += dt;
+        }
+
+        bomberBlasts.RemoveAll(
+            blast =>
+                blast.Age >=
+                BomberBlast.Lifetime);
+
         for (int bi = bullets.Count - 1; bi >= 0; bi--)
         {
             var b = bullets[bi];
             for (int ei = enemies.Count - 1; ei >= 0; ei--)
             {
                 var en = enemies[ei];
-                double hitR = en.Type == EnemyType.Boss ? 55 : 26;
+                double hitR = GetEnemyHitRadius(en); 
                 double dx = b.X - en.X, dy = b.Y - en.Y;
                 if (dx * dx + dy * dy < hitR * hitR)
                 {
@@ -862,11 +943,34 @@
         // collisions: enemy bullets vs farmer
         for (int i = enemyBullets.Count - 1; i >= 0; i--)
         {
-            var b = enemyBullets[i];
-            double dx = b.X - farmerX, dy = b.Y - farmerY;
-            if (dx * dx + dy * dy < 20 * 20)
+            var b =
+                enemyBullets[i];
+
+            // Bombs hurt through their explosion,
+            // not through direct collision.
+            if (b.EnemyKind ==
+                EnemyProjectileKind.BomberBomb)
+            {
+                continue;
+            }
+
+            double dx =
+                b.X - farmerX;
+
+            double dy =
+                b.Y - farmerY;
+
+            double hitRadius =
+                b.EnemyKind ==
+                    EnemyProjectileKind.WarMothership
+                        ? 32
+                        : 20;
+
+            if (dx * dx + dy * dy <
+                hitRadius * hitRadius)
             {
                 enemyBullets.RemoveAt(i);
+
                 Hurt();
             }
         }
@@ -875,8 +979,16 @@
         for (int i = enemies.Count - 1; i >= 0; i--)
         {
             var en = enemies[i];
-            double dx = en.X - farmerX, dy = en.Y - farmerY;
-            if (dx * dx + dy * dy < 42 * 42)
+            double dx = en.X - farmerX;
+
+            double dy =
+                en.Y - farmerY;
+
+            double hitRadius =
+                GetEnemyHitRadius(en) + 20;
+
+            if (dx * dx + dy * dy <
+                hitRadius * hitRadius)
             {
                 enemies.RemoveAt(i);
                 Hurt();
@@ -894,6 +1006,433 @@
                 ApplyPowerup(p);
             }
         }
+    }
+
+    void UpdateInterceptor(Enemy en, double dt)
+    {
+        en.X +=
+            Math.Sin(en.Phase * 2.4) *
+            en.VxBase *
+            dt /
+            1000 *
+            1.7;
+
+        en.X =
+            Math.Clamp(
+                en.X,
+                35,
+                W - 35);
+
+        if (en.State ==
+            EnemyState.Descending)
+        {
+            en.Y +=
+                en.Vy *
+                dt /
+                1000;
+
+            if (en.Y >= en.PatrolY)
+            {
+                en.Y = en.PatrolY;
+                en.State =
+                    EnemyState.Hovering;
+            }
+
+            return;
+        }
+
+        if (en.State ==
+            EnemyState.Hovering)
+        {
+            en.Y =
+                en.PatrolY +
+                Math.Sin(
+                    en.Phase * 2.8) *
+                9;
+
+            en.ShootTimer -= dt;
+            en.HoverTimer -= dt;
+
+            if (en.ShootTimer <= 0)
+            {
+                en.ShootTimer =
+                    650 +
+                    rng.NextDouble() *
+                    450;
+
+                if (enemyBullets.Count <
+                    MaxEnemyBullets)
+                {
+                    double dx =
+                        farmerX -
+                        en.X;
+
+                    enemyBullets.Add(
+                        new Bullet
+                        {
+                            X = en.X,
+                            Y = en.Y + 20,
+
+                            Vx =
+                                dx *
+                                0.001,
+
+                            Vy = 0.32,
+
+                            EnemyKind =
+                                EnemyProjectileKind
+                                    .Interceptor
+                        });
+                }
+            }
+
+            if (en.HoverTimer <= 0)
+            {
+                en.State =
+                    EnemyState.Fleeing;
+
+                en.Vy =
+                    -Math.Abs(en.Vy) *
+                    1.8;
+            }
+
+            return;
+        }
+
+        en.Y +=
+            en.Vy *
+            dt /
+            1000;
+    }
+
+    void UpdateBomber(Enemy en, double dt)
+    {
+        en.X +=
+            Math.Sin(en.Phase * 0.8) *
+            en.VxBase *
+            dt /
+            1000 *
+            0.45;
+
+        en.X =
+            Math.Clamp(
+                en.X,
+                45,
+                W - 45);
+
+        if (en.State ==
+            EnemyState.Descending)
+        {
+            en.Y +=
+                en.Vy *
+                dt /
+                1000;
+
+            if (en.Y >= en.PatrolY)
+            {
+                en.Y = en.PatrolY;
+                en.State =
+                    EnemyState.Hovering;
+            }
+
+            return;
+        }
+
+        if (en.State ==
+            EnemyState.Hovering)
+        {
+            en.Y =
+                en.PatrolY +
+                Math.Sin(en.Phase) * 4;
+
+            en.ShootTimer -= dt;
+            en.HoverTimer -= dt;
+
+            if (en.ShootTimer <= 0)
+            {
+                en.ShootTimer =
+                    1800 +
+                    rng.NextDouble() *
+                    750;
+
+                if (enemyBullets.Count <
+                    MaxEnemyBullets)
+                {
+                    // Bomb aims roughly where Ted
+                    // was when it was released.
+                    enemyBullets.Add(
+                        new Bullet
+                        {
+                            X = en.X,
+                            Y = en.Y + 25,
+
+                            Vx =
+                                (farmerX - en.X) *
+                                0.00012,
+
+                            Vy = 0.17,
+
+                            EnemyKind =
+                                EnemyProjectileKind
+                                    .BomberBomb
+                        });
+                }
+            }
+
+            if (en.HoverTimer <= 0)
+            {
+                en.State =
+                    EnemyState.Fleeing;
+
+                en.Vy =
+                    -Math.Abs(en.Vy);
+            }
+
+            return;
+        }
+
+        en.Y +=
+            en.Vy *
+            dt /
+            1000;
+    }
+
+    void UpdateBoss(Enemy en, double dt)
+    {
+        en.X +=
+            Math.Sin(en.Phase * 0.7) *
+            14 *
+            dt /
+            1000;
+
+        en.X =
+            Math.Clamp(
+                en.X,
+                90,
+                W - 90);
+
+        if (en.State ==
+            EnemyState.Descending)
+        {
+            en.Y +=
+                en.Vy *
+                dt /
+                1000;
+
+            if (en.Y >= en.PatrolY)
+            {
+                en.Y = en.PatrolY;
+                en.State =
+                    EnemyState.Hovering;
+            }
+
+            return;
+        }
+
+        en.Y =
+            en.PatrolY +
+            Math.Sin(
+                en.Phase * 1.2) *
+            6;
+
+        switch (en.BossVariant)
+        {
+            case BossVariant.Harvester:
+                UpdateHarvesterBoss(
+                    en,
+                    dt);
+                break;
+
+            case BossVariant.War:
+                UpdateWarBoss(
+                    en,
+                    dt);
+                break;
+
+            default:
+                UpdateScoutBoss(
+                    en,
+                    dt);
+                break;
+        }
+    }
+
+    void UpdateScoutBoss(Enemy en, double dt)
+    {
+        en.ShootTimer -= dt;
+
+        if (en.ShootTimer > 0)
+            return;
+
+        en.ShootTimer =
+            1300 +
+            rng.NextDouble() * 400;
+
+        if (enemyBullets.Count >=
+            MaxEnemyBullets)
+            return;
+
+        for (int s = -1;
+             s <= 1;
+             s++)
+        {
+            enemyBullets.Add(
+                new Bullet
+                {
+                    X = en.X,
+                    Y = en.Y + 35,
+
+                    Vx =
+                        s * 0.10 +
+                        (farmerX - en.X) *
+                        0.0004,
+
+                    Vy = 0.19,
+
+                    EnemyKind =
+                        EnemyProjectileKind.Standard
+                });
+        }
+    }
+
+    void UpdateWarBoss(Enemy en, double dt)
+    {
+        en.ShootTimer -= dt;
+
+        if (en.ShootTimer > 0)
+            return;
+
+        en.ShootTimer =
+            900 +
+            rng.NextDouble() * 350;
+
+        if (enemyBullets.Count >=
+            MaxEnemyBullets)
+            return;
+
+        enemyBullets.Add(
+            new Bullet
+            {
+                X = en.X,
+                Y = en.Y + 40,
+
+                Vx =
+                    (farmerX - en.X) *
+                    0.00038,
+
+                Vy = 0.18,
+
+                EnemyKind =
+                    EnemyProjectileKind
+                        .WarMothership
+            });
+    }
+
+    void UpdateHarvesterBoss(Enemy en, double dt)
+    {
+        if (en.State == EnemyState.Beaming)
+        {
+            en.X +=
+                (en.TargetFieldX - en.X) *
+                Math.Min(
+                    1,
+                    dt / 300);
+
+            en.BeamElapsed += dt;
+
+            if (en.BeamElapsed >= HarvesterBeamDuration)
+            {
+                StealTargetItem(en);
+
+                // The farm item stays stolen,
+                // but the boss is not physically
+                // carrying it like a Thief does.
+                en.StolenItemId = null;
+                en.TargetItemId = null;
+
+                en.State =
+                    EnemyState.Hovering;
+
+                en.ShootTimer =
+                    2200 +
+                    rng.NextDouble() *
+                    1100;
+            }
+
+            return;
+        }
+
+        if (en.TargetItemId != null)
+        {
+            en.X +=
+                (en.TargetFieldX - en.X) *
+                Math.Min(
+                    1,
+                    dt / 400);
+
+            if (Math.Abs(
+                    en.X -
+                    en.TargetFieldX) < 8)
+            {
+                en.State =
+                    EnemyState.Beaming;
+
+                en.BeamElapsed = 0;
+
+                AddWobbleRage(12);
+
+                _ = PlaySfx(
+                    "sfx_beam_deploy.wav");
+            }
+
+            return;
+        }
+
+        en.ShootTimer -= dt;
+
+        if (en.ShootTimer > 0)
+            return;
+
+        // Don't let the Harvester target an item
+        // already being pursued by another Thief
+        // or another Harvester.
+        var alreadyTargeted =
+            enemies
+                .Where(e =>
+                    e != en &&
+                    e.TargetItemId != null &&
+                    e.State != EnemyState.Fleeing &&
+                    (
+                        e.Type == EnemyType.Thief ||
+                        (
+                            e.Type == EnemyType.Boss &&
+                            e.BossVariant ==
+                                BossVariant.Harvester
+                        )
+                    ))
+                .Select(e => e.TargetItemId!)
+                .ToHashSet();
+
+        var targets =
+            items
+                .Where(i =>
+                    i.Safe &&
+                    !alreadyTargeted.Contains(i.Id))
+                .ToList();
+
+        if (targets.Count == 0)
+            return;
+
+        var target =
+            targets[
+                rng.Next(
+                    targets.Count)];
+
+        en.TargetItemId =
+            target.Id;
+
+        en.TargetFieldX =
+            target.FieldX;
     }
 
     void UpdateWobble(double dt)
@@ -1134,10 +1673,7 @@
             {
                 var enemy = enemies[enemyIndex];
 
-                double hitRadius =
-                    enemy.Type == EnemyType.Boss
-                        ? 55
-                        : 26;
+                double hitRadius = GetEnemyHitRadius(enemy);
 
                 double dx =
                     shot.X - enemy.X;
@@ -1179,10 +1715,7 @@
             bool hitEnemy =
                 enemies.Any(enemy =>
                 {
-                    double enemyRadius =
-                        enemy.Type == EnemyType.Boss
-                            ? 55
-                            : 26;
+                    double enemyRadius = GetEnemyHitRadius(enemy);
 
                     double dx =
                         enemy.X - egg.X;
@@ -1361,10 +1894,7 @@
         }
     }
 
-    void DamageEnemy(
-    int enemyIndex,
-    int damage,
-    bool fromWobble)
+    void DamageEnemy(int enemyIndex, int damage, bool fromWobble)
     {
         if (enemyIndex < 0 ||
             enemyIndex >= enemies.Count)
@@ -1386,8 +1916,19 @@
 
             // His specialty:
             // make alien abductions take longer.
-            if (enemy.Type == EnemyType.Thief &&
-                enemy.State == EnemyState.Beaming)
+            bool isAbducting = enemy.State == EnemyState.Beaming &&
+            (
+                enemy.Type ==
+                    EnemyType.Thief ||
+                (
+                    enemy.Type ==
+                        EnemyType.Boss &&
+                    enemy.BossVariant ==
+                        BossVariant.Harvester
+                )
+            );
+
+            if (isAbducting)
             {
                 double beamPushback =
                     wobbleRageT > 0
@@ -1447,6 +1988,44 @@
                     enemy.X,
                     enemy.Y,
                     ExplosionSize.Small);
+
+                AddWobbleRage(5);
+
+                break;
+
+            case EnemyType.Interceptor:
+
+                score += 18;
+
+                DropCoinMaybe(
+                    enemy.X,
+                    enemy.Y,
+                    0.25,
+                    1);
+
+                SpawnExplosion(
+                    enemy.X,
+                    enemy.Y,
+                    ExplosionSize.Small);
+
+                AddWobbleRage(3);
+
+                break;
+
+            case EnemyType.Bomber:
+
+                score += 30;
+
+                DropCoinMaybe(
+                    enemy.X,
+                    enemy.Y,
+                    0.5,
+                    2);
+
+                SpawnExplosion(
+                    enemy.X,
+                    enemy.Y,
+                    ExplosionSize.Medium);
 
                 AddWobbleRage(5);
 
@@ -1551,13 +2130,19 @@
         if (enemy.Type == EnemyType.Thief)
             return 2;
 
-        if (enemy.Type == EnemyType.Elite)
+        if (enemy.Type == EnemyType.Bomber)
             return 3;
 
-        if (enemy.Type == EnemyType.Boss)
+        if (enemy.Type == EnemyType.Interceptor)
             return 4;
 
-        return 5;
+        if (enemy.Type == EnemyType.Elite)
+            return 5;
+
+        if (enemy.Type == EnemyType.Boss)
+            return 6;
+
+        return 7;
     }
 
     void AddWobbleRage(double amount)
@@ -1592,98 +2177,303 @@
 
     void SpawnEnemy()
     {
-        if (enemies.Count >= MaxEnemies) return;
+        if (enemies.Count >= MaxEnemies)
+            return;
+
         var alreadyTargeted = enemies
-            .Where(e => e.Type == EnemyType.Thief && e.State != EnemyState.Fleeing && e.TargetItemId != null)
-            .Select(e => e.TargetItemId!)
-            .ToHashSet();
-        var availableTargets = items.Where(i => i.Safe && !alreadyTargeted.Contains(i.Id)).ToList();
+        .Where(e =>
+            e.TargetItemId != null &&
+            e.State != EnemyState.Fleeing &&
+            (
+                e.Type == EnemyType.Thief ||
+                (
+                    e.Type == EnemyType.Boss &&
+                    e.BossVariant ==
+                        BossVariant.Harvester
+                )
+            ))
+        .Select(e => e.TargetItemId!)
+        .ToHashSet();
+
+        var availableTargets =
+            items
+                .Where(i =>
+                    i.Safe &&
+                    !alreadyTargeted.Contains(i.Id))
+                .ToList();
 
         double thiefChance =
-            Math.Min(
-                0.38,
-                0.12 + (wave - 1) * 0.03);
+            availableTargets.Count > 0
+                ? Math.Min(
+                    0.32,
+                    0.12 +
+                    (wave - 1) * 0.025)
+                : 0;
+
+        double interceptorChance =
+            wave >= 3
+                ? Math.Min(
+                    0.22,
+                    0.07 +
+                    (wave - 3) * 0.02)
+                : 0;
+
+        double bomberChance =
+            wave >= 4
+                ? Math.Min(
+                    0.18,
+                    0.05 +
+                    (wave - 4) * 0.018)
+                : 0;
 
         double eliteChance =
-            wave < 3
-                ? 0
-                : Math.Min(
-                    0.30,
-                    0.06 + (wave - 3) * 0.035);
+            wave >= 3
+                ? Math.Min(
+                    0.25,
+                    0.06 +
+                    (wave - 3) * 0.025)
+                : 0;
 
-        bool isThief =
-            availableTargets.Count > 0 &&
-            rng.NextDouble() < thiefChance;
+        double roll = rng.NextDouble();
 
-        bool isElite =
-            !isThief &&
-            rng.NextDouble() < eliteChance;
+        EnemyType type;
 
-        var type =
-            isThief
-                ? EnemyType.Thief
-                : isElite
-                    ? EnemyType.Elite
-                    : EnemyType.Fighter;
+        if (roll < thiefChance)
+        {
+            type = EnemyType.Thief;
+        }
+        else
+        {
+            roll -= thiefChance;
 
-        // Regular ships get tougher every couple of waves.
+            if (roll < interceptorChance)
+            {
+                type = EnemyType.Interceptor;
+            }
+            else
+            {
+                roll -= interceptorChance;
+
+                if (roll < bomberChance)
+                {
+                    type = EnemyType.Bomber;
+                }
+                else
+                {
+                    roll -= bomberChance;
+
+                    type =
+                        roll < eliteChance
+                            ? EnemyType.Elite
+                            : EnemyType.Fighter;
+                }
+            }
+        }
+
         int hp =
-            2 +
-            (wave - 1) / 2 +
-            rng.Next(0, 2);
+            type switch
+            {
+                EnemyType.Interceptor =>
+                    Math.Min(
+                        3 + wave / 3,
+                        9),
 
-        if (isElite)
+                EnemyType.Bomber =>
+                    Math.Min(
+                        8 + wave,
+                        20),
+
+                EnemyType.Elite =>
+                    Math.Min(
+                        8 + wave,
+                        22),
+
+                EnemyType.Thief =>
+                    Math.Min(
+                        5 + wave / 2,
+                        14),
+
+                EnemyType.Fighter =>
+                    Math.Min(
+                        3 + wave / 2,
+                        12),
+
+                _ => 3
+            };
+
+        double baseSpeed =
+            type switch
+            {
+                EnemyType.Interceptor => 135,
+                EnemyType.Bomber => 78,
+                EnemyType.Thief => 92,
+                EnemyType.Elite => 105,
+                EnemyType.Fighter => 88,
+                _ => 88
+            };
+
+        double patrolY =
+            type switch
+            {
+                EnemyType.Thief =>
+                    BeamHoverY,
+
+                EnemyType.Interceptor =>
+                    H *
+                    (0.23 +
+                     rng.NextDouble() * 0.12),
+
+                EnemyType.Bomber =>
+                    H *
+                    (0.27 +
+                     rng.NextDouble() * 0.10),
+
+                _ =>
+                    H *
+                    (0.30 +
+                     rng.NextDouble() * 0.18)
+            };
+
+        var en =
+            new Enemy
+            {
+                X =
+                    40 +
+                    rng.NextDouble() *
+                    (W - 80),
+
+                Y = -45,
+
+                Vy =
+                    baseSpeed *
+                    (0.9 +
+                     rng.NextDouble() * 0.5) *
+                    (1 +
+                     difficulty * 0.06),
+
+                VxBase =
+                    (rng.NextDouble() < 0.5
+                        ? -1
+                        : 1) *
+                    (20 +
+                     rng.NextDouble() * 24),
+
+                Phase =
+                    rng.NextDouble() *
+                    Math.PI * 2,
+
+                Hp = hp,
+                MaxHp = hp,
+
+                Type = type,
+
+                ShootTimer =
+                    600 +
+                    rng.NextDouble() * 800,
+
+                StealZoneY =
+                    ItemFieldY,
+
+                Wobble =
+                    rng.NextDouble() * 2 + 1,
+
+                PatrolY =
+                    patrolY,
+
+                HoverTimer =
+                    type switch
+                    {
+                        EnemyType.Interceptor =>
+                            3000 +
+                            rng.NextDouble() * 1500,
+
+                        EnemyType.Bomber =>
+                            5000 +
+                            rng.NextDouble() * 1800,
+
+                        _ =>
+                            4000 +
+                            rng.NextDouble() * 2500
+                    }
+            };
+
+        if (type == EnemyType.Thief)
         {
-            hp +=
-                3 +
-                Math.Min(4, wave / 3);
+            var target =
+                availableTargets[
+                    rng.Next(
+                        availableTargets.Count)];
+
+            en.TargetItemId =
+                target.Id;
+
+            en.TargetFieldX =
+                target.FieldX;
         }
 
-        hp = Math.Min(
-            hp,
-            isElite ? 14 : 9);
-
-        var en = new Enemy
-        {
-            X = 30 + rng.NextDouble() * (W - 60),
-            Y = -30,
-            Vy = (isThief ? 24 : 30) * (0.9 + rng.NextDouble() * 0.5) * (1 + difficulty * 0.06),
-            VxBase = (rng.NextDouble() < 0.5 ? -1 : 1) * (20 + rng.NextDouble() * 24),
-            Phase = rng.NextDouble() * Math.PI * 2,
-            Hp = hp,
-            MaxHp = hp,
-            Type = type,
-            ShootTimer = 600 + rng.NextDouble() * 800,
-            StealZoneY = ItemFieldY,
-            Wobble = rng.NextDouble() * 2 + 1,
-            PatrolY = isThief ? BeamHoverY : H * (0.30 + rng.NextDouble() * 0.18),
-            HoverTimer = 4000 + rng.NextDouble() * 2500,
-        };
-        if (isThief)
-        {
-            var target = availableTargets[rng.Next(availableTargets.Count)];
-            en.TargetItemId = target.Id;
-            en.TargetFieldX = target.FieldX;
-        }
         enemies.Add(en);
     }
 
     void SpawnBoss()
     {
-        int hp = 20 + wave * 4;
-        enemies.Add(new Enemy
-        {
-            X = W / 2,
-            Y = -60,
-            Vy = 42,
-            Phase = 0,
-            Hp = hp,
-            MaxHp = hp,
-            Type = EnemyType.Boss,
-            ShootTimer = 1800,
-            PatrolY = H * 0.22,
-            Wobble = 1,
-        });
+        int bossNumber =
+            Math.Max(
+                1,
+                wave / 5);
+
+        BossVariant variant =
+            (BossVariant)(
+                (bossNumber - 1) % 3);
+
+        int hp =
+            20 +
+            wave * 4;
+
+        hp +=
+            variant switch
+            {
+                BossVariant.Harvester => 8,
+                BossVariant.War => 14,
+                _ => 0
+            };
+
+        enemies.Add(
+            new Enemy
+            {
+                X = W / 2,
+                Y = -90,
+
+                Vy = 42,
+
+                Phase = 0,
+
+                Hp = hp,
+                MaxHp = hp,
+
+                Type =
+                    EnemyType.Boss,
+
+                BossVariant =
+                    variant,
+
+                ShootTimer =
+                    variant switch
+                    {
+                        BossVariant.Harvester =>
+                            1800,
+
+                        BossVariant.War =>
+                            1100,
+
+                        _ =>
+                            1500
+                    },
+
+                PatrolY =
+                    H * 0.22,
+
+                Wobble = 1
+            });
     }
 
     void DropPowerupMaybe(
@@ -1777,6 +2567,38 @@
         if (explosions.Count >= MaxExplosions) return;
         explosions.Add(new Explosion { X = x, Y = y, Size = size });
         _ = PlaySfx(rng.Next(2) == 0 ? "sfx_explosion_1.wav" : "sfx_explosion_2.wav", size == ExplosionSize.Large ? 0.9 : 0.6);
+    }
+
+    void SpawnBomberBlast(double x, double y)
+    {
+        bomberBlasts.Add(
+            new BomberBlast
+            {
+                X = x,
+                Y = y
+            });
+
+        double dx =
+            farmerX - x;
+
+        double dy =
+            farmerY - y;
+
+        double radiusSquared =
+            BomberBlastRadius *
+            BomberBlastRadius;
+
+        if (dx * dx + dy * dy <=
+            radiusSquared)
+        {
+            Hurt();
+        }
+
+        _ = PlaySfx(
+            rng.Next(2) == 0
+                ? "sfx_explosion_1.wav"
+                : "sfx_explosion_2.wav",
+            0.8);
     }
 
     void StealTargetItem(Enemy en)
@@ -1947,73 +2769,141 @@
             },
 
             WobbleShots = wobbleShots
-            .SelectMany(s => new float[]
-            {
+                .SelectMany(s => new float[]
+                {
                 s.Id.GetHashCode(),
                 (float)s.X,
                 (float)s.Y
-            })
-            .ToArray(),
+                })
+                .ToArray(),
 
-                    WobbleEggs = wobbleEggs
-            .SelectMany(e => new float[]
-            {
+            WobbleEggs = wobbleEggs
+                .SelectMany(e => new float[]
+                {
                 e.Id.GetHashCode(),
                 (float)e.X,
                 (float)e.Y,
                 (float)e.Rotation
-            })
-            .ToArray(),
+                })
+                .ToArray(),
 
-                    WobbleEggBlasts = wobbleEggBlasts
-            .SelectMany(e => new float[]
-            {
+            WobbleEggBlasts = wobbleEggBlasts
+                .SelectMany(e => new float[]
+                {
                 e.Id.GetHashCode(),
                 (float)e.X,
                 (float)e.Y,
                 (float)Math.Min(
                     1,
                     e.Age / WobbleEggBlast.Lifetime)
-            })
-            .ToArray(),
-
-            Bullets = bullets
-                .SelectMany(b => new float[] { b.Id.GetHashCode(), (float)b.X, (float)b.Y, b.IsFlame ? 1f : 0f })
+                })
                 .ToArray(),
 
+            // Ted projectiles
+            // [id, x, y, projectileKind]
+            // 0 = normal bullet
+            // 1 = flame burst
+            Bullets = bullets
+                .SelectMany(b => new float[]
+                {
+                b.Id.GetHashCode(),
+                (float)b.X,
+                (float)b.Y,
+                b.IsFlame ? 1f : 0f
+                })
+                .ToArray(),
+
+            // Alien projectiles
+            // [id, x, y, projectileKind, rotation]
             EnemyBullets = enemyBullets
-                .SelectMany(b => new float[] { b.Id.GetHashCode(), (float)b.X, (float)b.Y })
+                .SelectMany(b => new float[]
+                {
+                b.Id.GetHashCode(),
+                (float)b.X,
+                (float)b.Y,
+                (float)b.EnemyKind,
+                (float)Math.Atan2(
+                    b.Vy,
+                    b.Vx)
+                })
                 .ToArray(),
 
             Enemies = enemies
                 .Select(en => new
                 {
                     Id = en.Id.GetHashCode(),
+
                     X = (float)en.X,
                     Y = (float)en.Y,
+
                     en.Hp,
                     en.MaxHp,
+
                     Type = (float)en.Type,
-                    IsBeaming = en.Type == EnemyType.Thief && en.State == EnemyState.Beaming,
-                    TargetItemId = en.TargetItemId, // Pass which farm item is being stolen
-                    BeamProgress = en.State == EnemyState.Beaming
-                        ? (float)Math.Min(1, en.BeamElapsed / BeamDuration)
-                        : 0f
+
+                    BossVariant =
+                        (float)en.BossVariant,
+
+                    // Regular Thief beam.
+                    IsBeaming =
+                        en.Type == EnemyType.Thief &&
+                        en.State == EnemyState.Beaming,
+
+                    // Special Harvester mothership beam.
+                    IsHarvesterBeaming =
+                        en.Type == EnemyType.Boss &&
+                        en.BossVariant == BossVariant.Harvester &&
+                        en.State == EnemyState.Beaming,
+
+                    TargetItemId =
+                        en.TargetItemId,
+
+                    BeamProgress =
+                        en.State == EnemyState.Beaming
+                            ? (float)Math.Min(
+                                1,
+                                en.BeamElapsed /
+                                (
+                                    en.Type == EnemyType.Boss &&
+                                    en.BossVariant == BossVariant.Harvester
+                                        ? HarvesterBeamDuration
+                                        : BeamDuration
+                                ))
+                            : 0f
                 })
                 .ToArray(),
 
-            // Only render ground items if they are safe AND not actively being beamed up
+            // Only render farm items that are safe
+            // and aren't currently being pulled into a beam.
             Items = items
-                .Where(i => i.Safe && !IsBeingBeamed(i.Id))
-                .Select(i => new { i.Id, X = (float)i.FieldX, Y = (float)ItemFieldY })
+                .Where(i =>
+                    i.Safe &&
+                    !IsBeingBeamed(i.Id))
+                .Select(i => new
+                {
+                    i.Id,
+                    X = (float)i.FieldX,
+                    Y = (float)ItemFieldY
+                })
                 .ToArray(),
 
             Powerups = powerups
-                .Select(p => new { Id = p.Id.GetHashCode(), p.Key, X = (float)p.X, Y = (float)p.Y })
+                .Select(p => new
+                {
+                    Id = p.Id.GetHashCode(),
+                    p.Key,
+                    X = (float)p.X,
+                    Y = (float)p.Y
+                })
                 .ToArray(),
 
             Coins = coinPickups
-                .SelectMany(c => new float[] { c.Id.GetHashCode(), (float)c.X, (float)c.Y })
+                .SelectMany(c => new float[]
+                {
+                c.Id.GetHashCode(),
+                (float)c.X,
+                (float)c.Y
+                })
                 .ToArray(),
 
             Explosions = explosions
@@ -2023,11 +2913,40 @@
                 (float)ex.X,
                 (float)ex.Y,
                 (float)ex.Size,
-                (float)Math.Min(1, ex.Age / Explosion.Lifetime)
+                (float)Math.Min(
+                    1,
+                    ex.Age / Explosion.Lifetime)
+                })
+                .ToArray(),
+
+            // Bomber AoE explosion animation
+            // [id, x, y, progress]
+            BomberBlasts = bomberBlasts
+                .SelectMany(b => new float[]
+                {
+                b.Id.GetHashCode(),
+                (float)b.X,
+                (float)b.Y,
+                (float)Math.Min(
+                    1,
+                    b.Age / BomberBlast.Lifetime)
                 })
                 .ToArray()
         };
 
-        await JS.InvokeVoidAsync("alienFarmPixi.sync", frame);
+        await JS.InvokeVoidAsync(
+            "alienFarmPixi.sync",
+            frame);
+    }
+
+    double GetEnemyHitRadius( Enemy enemy)
+    {
+        return enemy.Type switch
+        {
+            EnemyType.Boss => 80,
+            EnemyType.Bomber => 40,
+            EnemyType.Interceptor => 32,
+            _ => 36
+        };
     }
 }

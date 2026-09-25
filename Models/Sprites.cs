@@ -39,6 +39,23 @@ public static class Sprites
     public const string FxBeamColumn = "images/fx_beam_column.png";
     public const string FxBeamFocus = "images/fx_beam_focus.png";
 
+    public const string TedBullet = "images/ted_bullet.png";
+    public const string TedFlameBurst = "images/ted_flame_burst.png";
+
+    public const string UfoInterceptor = "images/ufo_interceptor.png";
+    public const string UfoBomber = "images/ufo_bomber.png";
+
+    public const string UfoBossScout = "images/ufo_boss_scout.png";
+    public const string UfoBossHarvester = "images/ufo_boss_harvester.png";
+    public const string UfoBossWar = "images/ufo_boss_war.png";
+
+    public const string InterceptorShot = "images/interceptor_shot.png";
+    public const string BomberBomb = "images/bomber_bomb.png";
+    public const string BomberBlast = "images/bomber_blast.png";
+
+    public const string HarvesterBeamEmitter = "images/harvester_beam_emitter.png";
+    public const string WarMothershipShot = "images/war_mothership_shot.png";
+
     public static string ForUpgrade(string key) => key switch
     {
         "life" => "images/upgrade_life.png",
