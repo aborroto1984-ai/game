@@ -129,9 +129,118 @@
     {
         <div class="overlay">
             <h1>⏸ PAUSED</h1>
-            <div class="stat-line">Score: <b>@score</b> &nbsp; Wave: <b>@wave</b></div>
-            <button class="play" @onclick="TogglePause">Resume</button>
-            <button class="shop-link" @onclick="QuitToMenu">🚪 Quit to Menu</button>
+
+            <div class="stat-line">
+                Score: <b>@score</b>
+                &nbsp;
+                Wave: <b>@wave</b>
+            </div>
+
+            <button class="shop-link"
+                    @onclick="ToggleDiagnostics">
+                @(showDiagnostics
+                            ? "Hide Diagnostics"
+                            : "Diagnostics")
+        </button>
+
+        @if (showDiagnostics)
+            {
+                <div class="controls-hint">
+
+                    <b>Performance</b><br />
+
+                    FPS:
+                    <b>@diagFps.ToString("0.0")</b><br />
+
+                    Frame:
+                    <b>@diagAvgFrameMs.ToString("0.0") ms</b>
+                    avg /
+                    <b>@diagWorstFrameMs.ToString("0.0") ms</b>
+                    worst<br />
+
+                    Update:
+                    <b>@diagAvgUpdateMs.ToString("0.00") ms</b>
+                    avg /
+                    <b>@diagWorstUpdateMs.ToString("0.00") ms</b>
+                    worst<br />
+
+                    Pixi Sync:
+                    <b>@diagAvgPixiMs.ToString("0.00") ms</b>
+                    avg /
+                    <b>@diagWorstPixiMs.ToString("0.00") ms</b>
+                    worst<br />
+
+                    Blazor Render:
+                    <b>@diagAvgBlazorMs.ToString("0.00") ms</b>
+                    avg /
+                    <b>@diagWorstBlazorMs.ToString("0.00") ms</b>
+                    worst<br />
+
+                    <br />
+
+                    <b>Objects</b><br />
+
+                    Enemies:
+                    <b>@enemies.Count</b><br />
+
+                    Ted shots:
+                    <b>@bullets.Count</b><br />
+
+                    Wobble shots:
+                    <b>@(wobbleShots.Count + wobbleEggs.Count)</b><br />
+
+                    Enemy shots:
+                    <b>@enemyBullets.Count</b><br />
+
+                    Effects:
+                    <b>
+                        @(explosions.Count + bomberBlasts.Count + wobbleEggBlasts.Count)
+            </b><br />
+
+                    Coins:
+                    <b>@coinPickups.Count</b><br />
+
+                    Powerups:
+                    <b>@powerups.Count</b>
+
+            @if (diagSpikes.Count > 0)
+                    {
+                        <br />
+                        <br />
+
+                        <b>Recent Spikes</b>
+            
+                        <br />
+
+                        @foreach (var spike in diagSpikes)
+                        {
+                            <div>@spike</div>
+                        }
+                    }
+
+                    <br />
+
+                    <button class="shop-link"
+                            @onclick="CopyDiagnosticsAsync">
+                        Copy Diagnostics
+                    </button>
+
+                    @if (!string.IsNullOrWhiteSpace(diagCopyStatus))
+                    {
+                        <div>@diagCopyStatus</div>
+                    }
+                </div>
+            }
+
+            <button class="play"
+                    @onclick="TogglePause">
+                Resume
+            </button>
+
+            <button class="shop-link"
+                    @onclick="QuitToMenu">
+                🚪 Quit to Menu
+            </button>
         </div>
     }
 </div>
@@ -156,6 +265,31 @@
     ScreenState screen = ScreenState.Start;
     bool paused = false;
     bool showHelp = false;
+    bool showDiagnostics = false;
+
+    double diagFps;
+    double diagAvgFrameMs;
+    double diagAvgUpdateMs;
+    double diagAvgPixiMs;
+    double diagAvgBlazorMs;
+
+    double diagWorstFrameMs;
+    double diagWorstUpdateMs;
+    double diagWorstPixiMs;
+    double diagWorstBlazorMs;
+
+    double diagWindowElapsedMs;
+    double diagWindowUpdateMs;
+    double diagWindowPixiMs;
+    double diagWindowBlazorMs;
+
+    int diagWindowFrames;
+    int diagWindowPixiPushes;
+    int diagWindowBlazorRenders;
+
+    readonly List<string> diagSpikes = new();
+
+    string diagCopyStatus = "";
 
     double time, difficulty = 1;
     int score, lives;
@@ -481,6 +615,8 @@
         score = 0;
         lives = 4 + Progress.LifeLevel;
 
+        ResetDiagnostics();
+
         farmerX = W / 2;
         farmerTargetX = W / 2;
 
@@ -572,9 +708,11 @@
         await stageRef.FocusAsync();
     }
 
-    async Task RunLoop(CancellationToken token)
+    async Task RunLoop(
+    CancellationToken token)
     {
-        var clock = Stopwatch.StartNew();
+        var clock =
+            Stopwatch.StartNew();
 
         double last =
             clock.Elapsed.TotalMilliseconds;
@@ -582,55 +720,94 @@
         double pixiAccumulator = 0;
         double blazorAccumulator = 0;
 
-        // Keep the actual game simulation at 60 Hz.
         const double SimulationFrameMs =
             1000.0 / 60.0;
 
-        // Only serialize/send the full Pixi frame at 30 Hz.
         const double PixiFrameMs =
             1000.0 / 30.0;
 
-        // HUD / Razor rendering can stay at 15 Hz.
         const double BlazorFrameMs =
             1000.0 / 15.0;
 
-        while (!token.IsCancellationRequested &&
-               screen == ScreenState.Playing)
+        while (
+            !token.IsCancellationRequested &&
+            screen == ScreenState.Playing)
         {
             double frameStart =
                 clock.Elapsed.TotalMilliseconds;
 
+            double rawFrameMs =
+                frameStart - last;
+
             double dt =
                 Math.Min(
-                    frameStart - last,
+                    rawFrameMs,
                     40);
 
             last = frameStart;
 
             if (!paused)
             {
-                // Gameplay still runs every simulation frame.
+                double updateStart =
+                    clock.Elapsed.TotalMilliseconds;
+
                 Update(dt);
+
+                double updateMs =
+                    clock.Elapsed.TotalMilliseconds -
+                    updateStart;
 
                 pixiAccumulator += dt;
                 blazorAccumulator += dt;
 
-                // Full C# -> JS snapshot only 30 times/sec.
+                double pixiMs = 0;
+                bool pixiPushed = false;
+
                 if (pixiAccumulator >= PixiFrameMs)
                 {
-                    pixiAccumulator %= PixiFrameMs;
+                    pixiAccumulator %=
+                        PixiFrameMs;
+
+                    double pixiStart =
+                        clock.Elapsed.TotalMilliseconds;
 
                     await PushPixiFrameAsync();
+
+                    pixiMs =
+                        clock.Elapsed.TotalMilliseconds -
+                        pixiStart;
+
+                    pixiPushed = true;
                 }
 
-                // Blazor is only needed for HUD / overlays.
+                double blazorMs = 0;
+                bool blazorRendered = false;
+
                 if (blazorAccumulator >= BlazorFrameMs)
                 {
-                    blazorAccumulator %= BlazorFrameMs;
+                    blazorAccumulator %=
+                        BlazorFrameMs;
+
+                    double blazorStart =
+                        clock.Elapsed.TotalMilliseconds;
 
                     await InvokeAsync(
                         StateHasChanged);
+
+                    blazorMs =
+                        clock.Elapsed.TotalMilliseconds -
+                        blazorStart;
+
+                    blazorRendered = true;
                 }
+
+                RecordDiagnostics(
+                    rawFrameMs,
+                    updateMs,
+                    pixiMs,
+                    pixiPushed,
+                    blazorMs,
+                    blazorRendered);
             }
 
             double workTime =
@@ -640,7 +817,8 @@
             int delay =
                 (int)Math.Max(
                     1,
-                    SimulationFrameMs - workTime);
+                    SimulationFrameMs -
+                    workTime);
 
             try
             {
@@ -2732,6 +2910,216 @@
     {
         paused = !paused;
         if (paused) await PauseMusic(); else await ResumeMusic();
+    }
+
+    void ToggleDiagnostics()
+    {
+        showDiagnostics = !showDiagnostics;
+        diagCopyStatus = "";
+    }
+
+    void ResetDiagnostics()
+    {
+        diagFps = 0;
+
+        diagAvgFrameMs = 0;
+        diagAvgUpdateMs = 0;
+        diagAvgPixiMs = 0;
+        diagAvgBlazorMs = 0;
+
+        diagWorstFrameMs = 0;
+        diagWorstUpdateMs = 0;
+        diagWorstPixiMs = 0;
+        diagWorstBlazorMs = 0;
+
+        diagWindowElapsedMs = 0;
+        diagWindowUpdateMs = 0;
+        diagWindowPixiMs = 0;
+        diagWindowBlazorMs = 0;
+
+        diagWindowFrames = 0;
+        diagWindowPixiPushes = 0;
+        diagWindowBlazorRenders = 0;
+
+        diagSpikes.Clear();
+        diagCopyStatus = "";
+    }
+
+    void RecordDiagnostics(
+        double frameMs,
+        double updateMs,
+        double pixiMs,
+        bool pixiPushed,
+        double blazorMs,
+        bool blazorRendered)
+    {
+        diagWindowElapsedMs += frameMs;
+        diagWindowUpdateMs += updateMs;
+        diagWindowFrames++;
+
+        if (pixiPushed)
+        {
+            diagWindowPixiMs += pixiMs;
+            diagWindowPixiPushes++;
+        }
+
+        if (blazorRendered)
+        {
+            diagWindowBlazorMs += blazorMs;
+            diagWindowBlazorRenders++;
+        }
+
+        diagWorstFrameMs =
+            Math.Max(
+                diagWorstFrameMs,
+                frameMs);
+
+        diagWorstUpdateMs =
+            Math.Max(
+                diagWorstUpdateMs,
+                updateMs);
+
+        if (pixiPushed)
+        {
+            diagWorstPixiMs =
+                Math.Max(
+                    diagWorstPixiMs,
+                    pixiMs);
+        }
+
+        if (blazorRendered)
+        {
+            diagWorstBlazorMs =
+                Math.Max(
+                    diagWorstBlazorMs,
+                    blazorMs);
+        }
+
+        bool spike =
+            frameMs >= 40 ||
+            updateMs >= 12 ||
+            (pixiPushed && pixiMs >= 18) ||
+            (blazorRendered && blazorMs >= 12);
+
+        if (spike)
+        {
+            string entry =
+                $"{time / 1000.0:0.0}s " +
+                $"W{wave} | " +
+                $"Frame {frameMs:0.0}ms | " +
+                $"Update {updateMs:0.0}ms | " +
+                $"Pixi {pixiMs:0.0}ms | " +
+                $"UI {blazorMs:0.0}ms | " +
+                $"E:{enemies.Count} " +
+                $"P:{bullets.Count + wobbleShots.Count + wobbleEggs.Count} " +
+                $"A:{enemyBullets.Count}";
+
+            diagSpikes.Insert(
+                0,
+                entry);
+
+            if (diagSpikes.Count > 8)
+            {
+                diagSpikes.RemoveAt(
+                    diagSpikes.Count - 1);
+            }
+        }
+
+        if (diagWindowElapsedMs >= 1000)
+        {
+            diagFps =
+                diagWindowFrames *
+                1000.0 /
+                diagWindowElapsedMs;
+
+            diagAvgFrameMs =
+                diagWindowElapsedMs /
+                Math.Max(
+                    1,
+                    diagWindowFrames);
+
+            diagAvgUpdateMs =
+                diagWindowUpdateMs /
+                Math.Max(
+                    1,
+                    diagWindowFrames);
+
+            diagAvgPixiMs =
+                diagWindowPixiPushes > 0
+                    ? diagWindowPixiMs /
+                      diagWindowPixiPushes
+                    : 0;
+
+            diagAvgBlazorMs =
+                diagWindowBlazorRenders > 0
+                    ? diagWindowBlazorMs /
+                      diagWindowBlazorRenders
+                    : 0;
+
+            diagWindowElapsedMs = 0;
+            diagWindowUpdateMs = 0;
+            diagWindowPixiMs = 0;
+            diagWindowBlazorMs = 0;
+
+            diagWindowFrames = 0;
+            diagWindowPixiPushes = 0;
+            diagWindowBlazorRenders = 0;
+        }
+    }
+
+    string BuildDiagnosticsReport()
+    {
+        return string.Join(
+            Environment.NewLine,
+            new[]
+            {
+            "ALIEN FARM HEIST DIAGNOSTICS",
+            $"Wave: {wave}",
+            $"Score: {score}",
+            "",
+            $"FPS: {diagFps:0.0}",
+            $"Frame Avg: {diagAvgFrameMs:0.00} ms",
+            $"Frame Worst: {diagWorstFrameMs:0.00} ms",
+            $"Update Avg: {diagAvgUpdateMs:0.00} ms",
+            $"Update Worst: {diagWorstUpdateMs:0.00} ms",
+            $"Pixi Avg: {diagAvgPixiMs:0.00} ms",
+            $"Pixi Worst: {diagWorstPixiMs:0.00} ms",
+            $"Blazor Avg: {diagAvgBlazorMs:0.00} ms",
+            $"Blazor Worst: {diagWorstBlazorMs:0.00} ms",
+            "",
+            $"Enemies: {enemies.Count}",
+            $"Ted Shots: {bullets.Count}",
+            $"Wobble Shots: {wobbleShots.Count + wobbleEggs.Count}",
+            $"Enemy Shots: {enemyBullets.Count}",
+            $"Effects: {explosions.Count + bomberBlasts.Count + wobbleEggBlasts.Count}",
+            $"Coins: {coinPickups.Count}",
+            $"Powerups: {powerups.Count}",
+            "",
+            "RECENT SPIKES",
+            diagSpikes.Count == 0
+                ? "None"
+                : string.Join(
+                    Environment.NewLine,
+                    diagSpikes)
+            });
+    }
+
+    async Task CopyDiagnosticsAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "navigator.clipboard.writeText",
+                BuildDiagnosticsReport());
+
+            diagCopyStatus =
+                "Diagnostics copied.";
+        }
+        catch
+        {
+            diagCopyStatus =
+                "Clipboard unavailable on this browser.";
+        }
     }
 
     async Task QuitToMenu()

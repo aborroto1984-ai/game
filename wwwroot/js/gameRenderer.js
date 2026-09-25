@@ -424,7 +424,7 @@ window.alienFarmPixi = (function () {
     function createSharedBulletGeometry() {
         enemyBulletContext =
             new PIXI.GraphicsContext()
-                .circle(0, 0, 8)
+                .circle(0, 0, 6)
                 .fill(0x8bff6b);
     }
 
@@ -829,17 +829,17 @@ window.alienFarmPixi = (function () {
             switch (kind) {
                 case 1:
                     texture = textures.interceptorShot;
-                    targetWidth = 24;
+                    targetWidth = 34;
                     break;
 
                 case 2:
                     texture = textures.bomberBomb;
-                    targetWidth = 34;
+                    targetWidth = 44;
                     break;
 
                 case 3:
                     texture = textures.warMothershipShot;
-                    targetWidth = 48;
+                    targetWidth = 60;
                     break;
             }
 
