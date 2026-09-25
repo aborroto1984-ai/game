@@ -10,9 +10,139 @@ window.gameAudio = (function () {
     let musicPaused = false;
     let unlockArmed = false;
 
-    const POOL_SIZE = 8;
-    const sfxPool = Array.from({ length: POOL_SIZE }, () => new Audio());
-    let poolIndex = 0;
+    // ------------------------------------------
+    // Web Audio SFX
+    // ------------------------------------------
+
+    let sfxContext = null;
+
+    const sfxBuffers =
+        new Map();
+
+    const sfxLoads =
+        new Map();
+
+    function getSfxContext() {
+        const AudioContextType =
+            window.AudioContext ||
+            window.webkitAudioContext;
+
+        if (!AudioContextType) {
+            return null;
+        }
+
+        if (!sfxContext) {
+            sfxContext =
+                new AudioContextType({
+                    latencyHint: "interactive"
+                });
+        }
+
+        return sfxContext;
+    }
+
+    async function loadSfx(src) {
+        if (sfxBuffers.has(src)) {
+            return sfxBuffers.get(src);
+        }
+
+        if (sfxLoads.has(src)) {
+            return sfxLoads.get(src);
+        }
+
+        const loadPromise =
+            (async () => {
+                const context =
+                    getSfxContext();
+
+                if (!context) {
+                    return null;
+                }
+
+                const response =
+                    await fetch(
+                        src,
+                        {
+                            cache: "force-cache"
+                        }
+                    );
+
+                if (!response.ok) {
+                    throw new Error(
+                        `Could not load SFX: ${src}`
+                    );
+                }
+
+                const data =
+                    await response.arrayBuffer();
+
+                const buffer =
+                    await context.decodeAudioData(
+                        data
+                    );
+
+                sfxBuffers.set(
+                    src,
+                    buffer
+                );
+
+                return buffer;
+            })();
+
+        sfxLoads.set(
+            src,
+            loadPromise
+        );
+
+        try {
+            return await loadPromise;
+        }
+        finally {
+            sfxLoads.delete(src);
+        }
+    }
+
+    async function preloadSfx(sources) {
+        if (!sources) {
+            return;
+        }
+
+        await Promise.allSettled(
+            sources.map(
+                src => loadSfx(src)
+            )
+        );
+    }
+
+    function unlockSfxContext() {
+        const context =
+            getSfxContext();
+
+        if (
+            context &&
+            context.state === "suspended"
+        ) {
+            context
+                .resume()
+                .catch(() => { });
+        }
+    }
+
+    // iPhone/WebKit requires audio to be unlocked
+    // from a user interaction.
+    [
+        "pointerdown",
+        "touchstart",
+        "keydown"
+    ].forEach(eventName => {
+        document.addEventListener(
+            eventName,
+            unlockSfxContext,
+            {
+                passive: true
+            }
+        );
+    });
 
     function armUnlockRetry() {
         if (unlockArmed) return;
@@ -180,15 +310,76 @@ window.gameAudio = (function () {
         }
     }
 
-    function playSfx(src, volume) {
-        const audio = sfxPool[poolIndex];
-        poolIndex = (poolIndex + 1) % POOL_SIZE;
+    function playSfx(src, volume
+    ) {
+        const context =
+            getSfxContext();
 
-        audio.pause();
-        audio.currentTime = 0;
-        audio.src = src;
-        audio.volume = volume ?? 0.7;
-        audio.play().catch(() => { });
+        if (!context) {
+            return;
+        }
+
+        if (
+            context.state ===
+            "suspended"
+        ) {
+            context
+                .resume()
+                .catch(() => { });
+        }
+
+        const playBuffer =
+            buffer => {
+                if (!buffer) {
+                    return;
+                }
+
+                const source =
+                    context
+                        .createBufferSource();
+
+                const gain =
+                    context
+                        .createGain();
+
+                source.buffer =
+                    buffer;
+
+                gain.gain.value =
+                    Math.max(
+                        0,
+                        Math.min(
+                            1,
+                            volume ?? 0.7
+                        )
+                    );
+
+                source.connect(gain);
+                gain.connect(
+                    context.destination
+                );
+
+                source.onended =
+                    () => {
+                        source.disconnect();
+                        gain.disconnect();
+                    };
+
+                source.start(0);
+            };
+
+        const buffer =
+            sfxBuffers.get(src);
+
+        if (buffer) {
+            playBuffer(buffer);
+            return;
+        }
+
+        // Safety fallback if a sound was not preloaded.
+        loadSfx(src)
+            .then(playBuffer)
+            .catch(() => { });
     }
 
     return {
@@ -198,6 +389,7 @@ window.gameAudio = (function () {
         stopMusic,
         pauseMusic,
         resumeMusic,
+        preloadSfx,
         playSfx
     };
 })();
@@ -301,11 +493,18 @@ window.alienFarmPixi = (function () {
         app = new PIXI.Application();
 
         const stageScale = parseFloat(
-            getComputedStyle(document.documentElement).getPropertyValue('--game-scale')
+            getComputedStyle(document.documentElement)
+                .getPropertyValue('--game-scale')
         ) || 1;
 
-        const pixelRatio = window.devicePixelRatio || 1;
-        const renderResolution = Math.min(pixelRatio * stageScale, 1.5);
+        const pixelRatio =
+            window.devicePixelRatio || 1;
+
+        const renderResolution =
+            Math.min(
+                pixelRatio * stageScale,
+                1.5
+            );
 
         await app.init({
             canvas: canvas,
@@ -318,16 +517,36 @@ window.alienFarmPixi = (function () {
             autoDensity: true
         });
 
-        await loadTextures(options.assets);
+        await loadTextures(
+            options.assets
+        );
 
-        itemLayer = new PIXI.Container();
-        enemyLayer = new PIXI.Container();
-        projectileLayer = new PIXI.Container();
-        pickupLayer = new PIXI.Container();
-        explosionLayer = new PIXI.Container();
-        playerLayer = new PIXI.Container();
+        itemLayer =
+            new PIXI.Container();
 
-        app.stage.addChild(itemLayer, enemyLayer, projectileLayer, pickupLayer, explosionLayer, playerLayer);
+        enemyLayer =
+            new PIXI.Container();
+
+        projectileLayer =
+            new PIXI.Container();
+
+        pickupLayer =
+            new PIXI.Container();
+
+        explosionLayer =
+            new PIXI.Container();
+
+        playerLayer =
+            new PIXI.Container();
+
+        app.stage.addChild(
+            itemLayer,
+            enemyLayer,
+            projectileLayer,
+            pickupLayer,
+            explosionLayer,
+            playerLayer
+        );
 
         createSharedBulletGeometry();
 
@@ -338,18 +557,30 @@ window.alienFarmPixi = (function () {
         // This preserves movement even when the transparent
         // mobile touch-control elements are above the canvas.
         inputSurface =
-            canvas.parentElement || canvas;
+            canvas.parentElement ||
+            canvas;
 
         inputSurface.addEventListener(
             "pointerdown",
             handlePlayerPointer,
-            { passive: true }
+            {
+                passive: true
+            }
         );
 
         inputSurface.addEventListener(
             "pointermove",
             handlePlayerPointer,
-            { passive: true }
+            {
+                passive: true
+            }
+        );
+
+        // Smooth enemy movement at the browser/display
+        // refresh rate instead of snapping to each
+        // C# -> JS snapshot.
+        app.ticker.add(
+            updateEnemyInterpolation
         );
 
         ready = true;
@@ -546,6 +777,37 @@ window.alienFarmPixi = (function () {
         }
     }
 
+    const ENEMY_INTERPOLATION_MS = 34;
+
+    function updateEnemyInterpolation() {
+        const now = performance.now();
+
+        for (const node of enemies.values()) {
+            const motion = node.motion;
+
+            if (!motion) {
+                continue;
+            }
+
+            const progress =
+                Math.min(
+                    1,
+                    (now - motion.startedAt) /
+                    ENEMY_INTERPOLATION_MS
+                );
+
+            node.root.position.set(
+                motion.fromX +
+                (motion.toX - motion.fromX) *
+                progress,
+
+                motion.fromY +
+                (motion.toY - motion.fromY) *
+                progress
+            );
+        }
+    }
+
     function createEnemy(data) {
         const root = new PIXI.Container();
 
@@ -601,12 +863,49 @@ window.alienFarmPixi = (function () {
             harvesterBeam,
             risingItem,
             type: data.type,
-            bossVariant
+            bossVariant,
+
+            motion: null
         };
     }
 
     function updateEnemy(node, data) {
-        node.root.position.set(data.x, data.y);
+        const now =
+            performance.now();
+
+        if (!node.motion) {
+            // First appearance: place immediately.
+            node.root.position.set(
+                data.x,
+                data.y
+            );
+
+            node.motion = {
+                fromX: data.x,
+                fromY: data.y,
+                toX: data.x,
+                toY: data.y,
+                startedAt: now
+            };
+        }
+        else {
+            // Continue from wherever the interpolated
+            // sprite currently is.
+            node.motion.fromX =
+                node.root.x;
+
+            node.motion.fromY =
+                node.root.y;
+
+            node.motion.toX =
+                data.x;
+
+            node.motion.toY =
+                data.y;
+
+            node.motion.startedAt =
+                now;
+        }
 
         const bossVariant = data.bossVariant || 0;
 

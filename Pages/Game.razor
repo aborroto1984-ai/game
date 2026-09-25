@@ -524,6 +524,21 @@
                 }
             });
 
+        var sfxFiles = new[]
+        {
+            "audio/sfx_bullet.mp3",
+            "audio/sfx_beam_deploy.wav",
+            "audio/sfx_coin.wav",
+            "audio/sfx_explosion_1.wav",
+            "audio/sfx_explosion_2.wav",
+            "audio/sfx_hit.wav",
+            "audio/sfx_powerup.wav",
+            "audio/sfx_wave_start.wav",
+            "audio/sfx_wobble.mp3"
+        };
+
+        await JS.InvokeVoidAsync("gameAudio.preloadSfx", (object)sfxFiles);
+
         pixiReady = true;
         loading = false;
         await InvokeAsync(StateHasChanged);
