@@ -203,6 +203,16 @@
                     Powerups:
                     <b>@powerups.Count</b>
 
+                    <br />
+
+                    <button class="shop-link"
+                            @onclick="() => diagnosticsDisableSfx = !diagnosticsDisableSfx">
+                        SFX:
+                        @(diagnosticsDisableSfx
+                                        ? "DISABLED"
+                                        : "ENABLED")
+                    </button>
+
             @if (diagSpikes.Count > 0)
                     {
                         <br />
@@ -286,6 +296,7 @@
     int diagWindowFrames;
     int diagWindowPixiPushes;
     int diagWindowBlazorRenders;
+    bool diagnosticsDisableSfx = false;
 
     readonly List<string> diagSpikes = new();
 
@@ -547,9 +558,21 @@
     }
     async Task PauseMusic() { try { await JS.InvokeVoidAsync("gameAudio.pauseMusic"); } catch { } }
     async Task ResumeMusic() { try { await JS.InvokeVoidAsync("gameAudio.resumeMusic"); } catch { } }
-    async Task PlaySfx(string file, double volume = 0.7)
+    async Task PlaySfx( string file, double volume = 0.7)
     {
-        try { await JS.InvokeVoidAsync("gameAudio.playSfx", $"audio/{file}", volume); } catch { }
+        if (diagnosticsDisableSfx)
+            return;
+
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "gameAudio.playSfx",
+                $"audio/{file}",
+                volume);
+        }
+        catch
+        {
+        }
     }
 
     async Task PlayTemporaryMusic(
