@@ -1,7 +1,7 @@
 {
   "mainAssemblyName": "AlienFarmHeist",
   "resources": {
-    "hash": "sha256-5yoNqlq2EXS3q2DN7NwjTY5UpwZTCLkETA3R03SXRXw=",
+    "hash": "sha256-5NruLqirvqPUrrgo0Fzm5jGj6c6j2XrsC77TJR2X3TE=",
     "jsModuleNative": {
       "dotnet.native.8.0.31.3ug9ydofr5.js": "sha256-SPttQW1Mut6R2p7MYTnfR5KuC/a9CqqKrw8CooTbqpU="
     },
@@ -9,7 +9,7 @@
       "dotnet.runtime.8.0.31.yqliaixnm0.js": "sha256-qzVt86q0GKgDNek5+WFBz2hU8jGxI86YJeZmNGXj/qM="
     },
     "wasmNative": {
-      "dotnet.native.wasm": "sha256-RusIfzvIYVGx3QpYM2zn7EQlCwEiAiZq/pPClg8oUGY="
+      "dotnet.native.wasm": "sha256-dIcf0wYS+MFGGlQ2+OYIWGMXtrFSrgyDGSgzDu93mj4="
     },
     "icu": {
       "icudt_CJK.dat": "sha256-SZLtQnRc0JkwqHab0VUVP7T3uBPSeYzxzDnpxPpUnHk=",
@@ -17,7 +17,7 @@
       "icudt_no_CJK.dat": "sha256-L7sV7NEYP37/Qr2FPCePo5cJqRgTXRwGHuwF5Q+0Nfs="
     },
     "assembly": {
-      "AlienFarmHeist.wasm": "sha256-HRW7YxB5DewwdNOFrGHu0gQXsX20qhCrfcwMwtggXW4=",
+      "AlienFarmHeist.wasm": "sha256-cGc/VaqI9Ev8vR6FLDZXH/tlZFrXapXjIxOM7Hn5cVA=",
       "Microsoft.AspNetCore.Components.wasm": "sha256-ybY9cDNIEE78ZK0R/fsTVAMq3hQpqwb1lfrCKn+SoGM=",
       "Microsoft.AspNetCore.Components.Web.wasm": "sha256-GGafe9R7/fewpsQukL9VOWaGYc8t9sOIs+Xtq4kjCAY=",
       "Microsoft.AspNetCore.Components.WebAssembly.wasm": "sha256-LdAy6nNgakNLR1G1UW0m1t/i4G5ASffvuPT/PUnY+Ho=",
@@ -38,7 +38,7 @@
       "System.Console.wasm": "sha256-FGPikAdBG61bbzQeGPk+kwDvgReBllg0IZRvQw7QLLA=",
       "System.Linq.wasm": "sha256-E0tteokmU1p8Y3ZSMil7+IuimSly5d6d+rDflLyTRe8=",
       "System.Memory.wasm": "sha256-DLbONZM+NH330qflWG/X9LRa9AS8XDX5Ghm04ycPQnY=",
-      "System.Private.CoreLib.wasm": "sha256-4JMBt2R0SmPWrbblDSm8PHcxwjdeSH3H//9eLPZ4hpw=",
+      "System.Private.CoreLib.wasm": "sha256-yTUnlnwLFiEpC77hhGk/dQW0pYuNsurIZKq8uAYD/0o=",
       "System.Private.Uri.wasm": "sha256-ixG2BBUwjx7VDk0iZth50VgrVqI0hoRzA00uXpxSByc=",
       "System.Runtime.InteropServices.JavaScript.wasm": "sha256-r8gV+TGkSpokxboaONQlxQoXashFHJvB5di0FmlxhHk=",
       "System.Runtime.wasm": "sha256-iYhQIZICE6CDUsVPTTcTx3yo9jKQWKNf1h57X0I/nIo=",

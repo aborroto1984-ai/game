@@ -234,12 +234,17 @@ window.alienFarmPixi = (function () {
     const coinMap = new Map();
     const powerupMap = new Map();
     const explosionMap = new Map();
+    const bomberBlasts = new Map();
 
-    const bulletPool = [];
-    const enemyTypes = ["Fighter", "Thief", "Elite", "Boss"];
+    const enemyTypes = [
+        "Fighter",
+        "Thief",
+        "Elite",
+        "Boss",
+        "Interceptor",
+        "Bomber"
+    ];
 
-    let playerBulletContext = null;
-    let flameBulletContext = null;
     let enemyBulletContext = null;
 
     async function init(canvas, options) {
@@ -303,6 +308,9 @@ window.alienFarmPixi = (function () {
             farmer: texture(assets.farmer),
             farmerFlame: texture(assets.farmerFlame),
 
+            tedBullet: texture(assets.tedBullet),
+            tedFlameBurst: texture(assets.tedFlameBurst),
+
             wobbleStanding: texture(assets.wobbleStanding),
             wobbleLeftLeg: texture(assets.wobbleLeftLeg),
             wobbleRightLeg: texture(assets.wobbleRightLeg),
@@ -318,7 +326,19 @@ window.alienFarmPixi = (function () {
             ufoFighter: texture(assets.ufoFighter),
             ufoThief: texture(assets.ufoThief),
             ufoElite: texture(assets.ufoElite),
-            ufoBoss: texture(assets.ufoBoss),
+
+            ufoInterceptor: texture(assets.ufoInterceptor),
+            ufoBomber: texture(assets.ufoBomber),
+
+            ufoBossScout: texture(assets.ufoBossScout),
+            ufoBossHarvester: texture(assets.ufoBossHarvester),
+            ufoBossWar: texture(assets.ufoBossWar),
+
+            interceptorShot: texture(assets.interceptorShot),
+            bomberBomb: texture(assets.bomberBomb),
+            bomberBlast: texture(assets.bomberBlast),
+            harvesterBeamEmitter: texture(assets.harvesterBeamEmitter),
+            warMothershipShot: texture(assets.warMothershipShot),
 
             beamColumn: texture(assets.beamColumn),
 
@@ -335,9 +355,10 @@ window.alienFarmPixi = (function () {
     }
 
     function createSharedBulletGeometry() {
-        playerBulletContext = new PIXI.GraphicsContext().circle(0, 0, 5).fill(0xffe36b);
-        flameBulletContext = new PIXI.GraphicsContext().circle(0, 0, 6.5).fill(0xff8a2e);
-        enemyBulletContext = new PIXI.GraphicsContext().circle(0, 0, 5).fill(0x8bff6b);
+        enemyBulletContext =
+            new PIXI.GraphicsContext()
+                .circle(0, 0, 8)
+                .fill(0x8bff6b);
     }
 
     function createFarmer() {
@@ -430,25 +451,52 @@ window.alienFarmPixi = (function () {
             targetWidth * ratio;
     }
 
-    function enemyTexture(type) {
+    function enemyTexture(type, bossVariant = 0) {
         switch (type) {
-            case "Thief": return textures.ufoThief;
-            case "Elite": return textures.ufoElite;
-            case "Boss": return textures.ufoBoss;
-            default: return textures.ufoFighter;
+            case "Thief":
+                return textures.ufoThief;
+
+            case "Elite":
+                return textures.ufoElite;
+
+            case "Interceptor":
+                return textures.ufoInterceptor;
+
+            case "Bomber":
+                return textures.ufoBomber;
+
+            case "Boss":
+                if (bossVariant === 1)
+                    return textures.ufoBossHarvester;
+
+                if (bossVariant === 2)
+                    return textures.ufoBossWar;
+
+                return textures.ufoBossScout;
+
+            default:
+                return textures.ufoFighter;
         }
     }
 
     function createEnemy(data) {
         const root = new PIXI.Container();
 
-        // Tractor beam sprite
+        // Regular Thief tractor beam.
         const beam = new PIXI.Sprite(textures.beamColumn);
         beam.anchor.set(0.5, 0);
         beam.visible = false;
         root.addChild(beam);
 
-        // Rising stolen item sprite (inside beam)
+        // Harvester mothership beam.
+        const harvesterBeam = new PIXI.Sprite(
+            textures.harvesterBeamEmitter
+        );
+        harvesterBeam.anchor.set(0.5, 0);
+        harvesterBeam.visible = false;
+        root.addChild(harvesterBeam);
+
+        // Rising stolen item sprite.
         const risingItem = new PIXI.Sprite();
         risingItem.anchor.set(0.5);
         risingItem.width = 28;
@@ -456,42 +504,66 @@ window.alienFarmPixi = (function () {
         risingItem.visible = false;
         root.addChild(risingItem);
 
-        const sprite = new PIXI.Sprite(enemyTexture(data.type));
+        const bossVariant = data.bossVariant || 0;
+
+        const sprite = new PIXI.Sprite(
+            enemyTexture(data.type, bossVariant)
+        );
         sprite.anchor.set(0.5);
         root.addChild(sprite);
 
         const hp = new PIXI.Text({
             text: "",
-            style: { fontFamily: "Arial", fontSize: 11, fontWeight: "700", fill: 0xffffff }
+            style: {
+                fontFamily: "Arial",
+                fontSize: 11,
+                fontWeight: "700",
+                fill: 0xffffff
+            }
         });
         hp.anchor.set(0.5);
         root.addChild(hp);
 
         enemyLayer.addChild(root);
 
-        return { root, sprite, hp, beam, risingItem, type: data.type };
+        return {
+            root,
+            sprite,
+            hp,
+            beam,
+            harvesterBeam,
+            risingItem,
+            type: data.type,
+            bossVariant
+        };
     }
 
     function updateEnemy(node, data) {
         node.root.position.set(data.x, data.y);
 
-        if (node.type !== data.type) {
+        const bossVariant = data.bossVariant || 0;
+
+        if (
+            node.type !== data.type ||
+            node.bossVariant !== bossVariant
+        ) {
             node.type = data.type;
-            node.sprite.texture = enemyTexture(data.type);
+            node.bossVariant = bossVariant;
+            node.sprite.texture = enemyTexture(
+                data.type,
+                bossVariant
+            );
         }
 
         if (data.type === "Boss") {
-            const targetWidth = 150;
+            const targetWidth = 205;
 
             const ratio =
                 node.sprite.texture.height /
                 node.sprite.texture.width || 1;
 
-            node.sprite.width =
-                targetWidth;
-
-            node.sprite.height =
-                targetWidth * ratio;
+            node.sprite.width = targetWidth;
+            node.sprite.height = targetWidth * ratio;
 
             node.hp.text =
                 data.hp +
@@ -500,119 +572,328 @@ window.alienFarmPixi = (function () {
 
             node.hp.y =
                 -(node.sprite.height / 2) -
-                14;
+                18;
         }
         else {
-            const targetWidth = 54;
-            const ratio = node.sprite.texture.height / node.sprite.texture.width || 1;
+            let targetWidth = 75;
+
+            if (data.type === "Interceptor")
+                targetWidth = 70;
+
+            if (data.type === "Bomber")
+                targetWidth = 90;
+
+            const ratio =
+                node.sprite.texture.height /
+                node.sprite.texture.width || 1;
+
             node.sprite.width = targetWidth;
             node.sprite.height = targetWidth * ratio;
 
             node.hp.text = String(data.hp);
-            node.hp.y = -35;
+            node.hp.y =
+                -(node.sprite.height / 2) -
+                10;
         }
 
-        // --- Tractor Beam & Rising Stolen Item ---
+        node.beam.visible = false;
+        node.harvesterBeam.visible = false;
+        node.risingItem.visible = false;
+
+        // ---------------------------------
+        // Harvester mothership beam
+        // ---------------------------------
+        if (data.isHarvesterBeaming) {
+            const beamStartY = 45;
+
+            node.harvesterBeam.visible = true;
+            node.harvesterBeam.x = 0;
+            node.harvesterBeam.y = beamStartY;
+
+            const beamWidth = 175;
+            const beamRatio =
+                node.harvesterBeam.texture.height /
+                node.harvesterBeam.texture.width || 1;
+
+            node.harvesterBeam.width = beamWidth;
+            node.harvesterBeam.height =
+                beamWidth * beamRatio;
+
+            const pulse =
+                (Math.sin(performance.now() / 90) + 1) / 2;
+
+            node.harvesterBeam.alpha =
+                0.75 +
+                pulse * 0.25;
+
+            if (
+                data.targetItemId &&
+                textures.items[data.targetItemId]
+            ) {
+                const tex =
+                    textures.items[data.targetItemId];
+
+                node.risingItem.visible = true;
+                node.risingItem.texture = tex;
+
+                const targetWidth =
+                    (itemBaseWidths[data.targetItemId] || 36) *
+                    0.9;
+
+                const ratio =
+                    tex.height /
+                    tex.width || 1;
+
+                node.risingItem.width = targetWidth;
+                node.risingItem.height =
+                    targetWidth * ratio;
+
+                const totalHeight =
+                    config.itemFieldY -
+                    data.y;
+
+                const easedProgress =
+                    data.beamProgress *
+                    data.beamProgress;
+
+                node.risingItem.x = 0;
+                node.risingItem.y =
+                    totalHeight *
+                    (1 - easedProgress);
+            }
+
+            return;
+        }
+
+        // ---------------------------------
+        // Regular Thief tractor beam
+        // ---------------------------------
         if (data.isBeaming) {
-            const beamStartY = 25;
+            const beamStartY = 32;
+
             node.beam.visible = true;
             node.beam.x = 0;
             node.beam.y = beamStartY;
-            node.beam.width = 80;
+            node.beam.width = 96;
 
-            const totalBeamHeight = config.itemFieldY - data.y - beamStartY;
-            node.beam.height = Math.max(0, totalBeamHeight);
+            const totalBeamHeight =
+                config.itemFieldY -
+                data.y -
+                beamStartY;
 
-            const pulse = (Math.sin(performance.now() / 110) + 1) / 2;
-            node.beam.alpha = 0.7 + pulse * 0.3;
+            node.beam.height =
+                Math.max(0, totalBeamHeight);
 
-            // Render Stolen Item Rising Up Beam
-            if (data.targetItemId && textures.items[data.targetItemId]) {
+            const pulse =
+                (Math.sin(performance.now() / 110) + 1) / 2;
+
+            node.beam.alpha =
+                0.7 +
+                pulse * 0.3;
+
+            if (
+                data.targetItemId &&
+                textures.items[data.targetItemId]
+            ) {
                 node.risingItem.visible = true;
-                const tex = textures.items[data.targetItemId];
+
+                const tex =
+                    textures.items[data.targetItemId];
+
                 node.risingItem.texture = tex;
 
-                // Apply independent sizing & aspect ratio to the rising item
-                const targetWidth = (itemBaseWidths[data.targetItemId] || 36) * 0.85; // Slightly shrink on beam
-                const ratio = (tex.height && tex.width) ? (tex.height / tex.width) : 1;
-                node.risingItem.width = targetWidth;
-                node.risingItem.height = targetWidth * ratio;
+                const targetWidth =
+                    (itemBaseWidths[data.targetItemId] || 36) *
+                    0.85;
 
-                // Quadratic ease curve so the item accelerates upwards into the ship
-                const easedProgress = data.beamProgress * data.beamProgress;
-                const currentOffsetY = totalBeamHeight * (1 - easedProgress);
+                const ratio =
+                    tex.height /
+                    tex.width || 1;
+
+                node.risingItem.width = targetWidth;
+                node.risingItem.height =
+                    targetWidth * ratio;
+
+                const easedProgress =
+                    data.beamProgress *
+                    data.beamProgress;
+
+                const currentOffsetY =
+                    totalBeamHeight *
+                    (1 - easedProgress);
 
                 node.risingItem.x = 0;
-                node.risingItem.y = beamStartY + currentOffsetY;
-            } else {
-                node.risingItem.visible = false;
+                node.risingItem.y =
+                    beamStartY +
+                    currentOffsetY;
             }
-        } else {
-            node.beam.visible = false;
-            node.risingItem.visible = false;
         }
     }
 
-    function createBullet(isFlame, isEnemy) {
-        let context = isEnemy ? enemyBulletContext : (isFlame ? flameBulletContext : playerBulletContext);
+    function createBullet(kind, isEnemy) {
+        let bullet;
 
-        let bullet = bulletPool.pop();
-        if (!bullet) {
-            bullet = new PIXI.Graphics(context);
-        } else {
-            bullet.context = context;
-            bullet.visible = true;
+        if (!isEnemy) {
+            const texture =
+                kind === 1
+                    ? textures.tedFlameBurst
+                    : textures.tedBullet;
+
+            bullet = new PIXI.Sprite(texture);
+            bullet.anchor.set(0.5);
+
+            // Keep the larger values that made Ted's shots readable.
+            const targetWidth =
+                kind === 1
+                    ? 80
+                    : 58;
+
+            const ratio =
+                texture.height /
+                texture.width || 1;
+
+            bullet.width = targetWidth;
+            bullet.height = targetWidth * ratio;
         }
+        else {
+            let texture = null;
+            let targetWidth = 0;
+
+            switch (kind) {
+                case 1:
+                    texture = textures.interceptorShot;
+                    targetWidth = 24;
+                    break;
+
+                case 2:
+                    texture = textures.bomberBomb;
+                    targetWidth = 34;
+                    break;
+
+                case 3:
+                    texture = textures.warMothershipShot;
+                    targetWidth = 48;
+                    break;
+            }
+
+            if (texture) {
+                bullet = new PIXI.Sprite(texture);
+                bullet.anchor.set(0.5);
+
+                const ratio =
+                    texture.height /
+                    texture.width || 1;
+
+                bullet.width = targetWidth;
+                bullet.height = targetWidth * ratio;
+            }
+            else {
+                bullet = new PIXI.Graphics(
+                    enemyBulletContext
+                );
+            }
+        }
+
+        bullet.projectileKind = kind;
 
         projectileLayer.addChild(bullet);
         return bullet;
     }
 
     function syncBulletsFlat(map, list, isEnemy) {
-        if (!list) return;
-        const seen = new Set();
-        const stride = isEnemy ? 3 : 4;
+        if (!list)
+            return;
 
-        for (let i = 0; i < list.length; i += stride) {
+        const seen = new Set();
+
+        const stride =
+            isEnemy
+                ? 5
+                : 4;
+
+        for (
+            let i = 0;
+            i < list.length;
+            i += stride
+        ) {
             const id = String(list[i]);
             const x = list[i + 1];
             const y = list[i + 2];
-            const isFlame = !isEnemy && list[i + 3] === 1;
+            const kind = list[i + 3] || 0;
+
+            const rotation =
+                isEnemy
+                    ? list[i + 4]
+                    : 0;
 
             seen.add(id);
 
             let bullet = map.get(id);
-            if (!bullet) {
-                bullet = createBullet(isFlame, isEnemy);
+
+            if (
+                !bullet ||
+                bullet.projectileKind !== kind
+            ) {
+                if (bullet) {
+                    projectileLayer.removeChild(bullet);
+                    bullet.destroy();
+                }
+
+                bullet = createBullet(
+                    kind,
+                    isEnemy
+                );
+
                 map.set(id, bullet);
             }
 
             bullet.position.set(x, y);
+
+            // The custom sprites are drawn pointing upward.
+            if (
+                isEnemy &&
+                (kind === 1 || kind === 3)
+            ) {
+                bullet.rotation =
+                    rotation -
+                    Math.PI / 2;
+            }
         }
 
         for (const [id, bullet] of map) {
             if (!seen.has(id)) {
                 projectileLayer.removeChild(bullet);
-                bullet.visible = false;
-                bulletPool.push(bullet);
+                bullet.destroy();
                 map.delete(id);
             }
         }
     }
 
     function syncEnemies(list) {
-        if (!list || !Array.isArray(list)) return;
+        if (!list || !Array.isArray(list))
+            return;
+
         const seen = new Set();
 
         for (const en of list) {
             const id = String(en.id);
-            const typeStr = enemyTypes[en.type] || "Fighter";
+            const typeStr =
+                enemyTypes[en.type] ||
+                "Fighter";
+
+            const bossVariant =
+                en.bossVariant || 0;
 
             seen.add(id);
 
             let node = enemies.get(id);
+
             if (!node) {
-                node = createEnemy({ type: typeStr });
+                node = createEnemy({
+                    type: typeStr,
+                    bossVariant
+                });
+
                 enemies.set(id, node);
             }
 
@@ -622,9 +903,14 @@ window.alienFarmPixi = (function () {
                 hp: en.hp,
                 maxHp: en.maxHp,
                 type: typeStr,
+                bossVariant,
                 isBeaming: en.isBeaming,
-                targetItemId: en.targetItemId,
-                beamProgress: en.beamProgress || 0
+                isHarvesterBeaming:
+                    en.isHarvesterBeaming,
+                targetItemId:
+                    en.targetItemId,
+                beamProgress:
+                    en.beamProgress || 0
             });
         }
 
@@ -816,6 +1102,60 @@ window.alienFarmPixi = (function () {
                 explosionLayer.removeChild(sprite);
                 sprite.destroy();
                 explosionMap.delete(id);
+            }
+        }
+    }
+
+    function syncBomberBlasts(list) {
+        if (!list)
+            return;
+
+        const seen = new Set();
+        const stride = 4;
+
+        for (
+            let i = 0;
+            i < list.length;
+            i += stride
+        ) {
+            const id = String(list[i]);
+            const x = list[i + 1];
+            const y = list[i + 2];
+            const progress = list[i + 3];
+
+            seen.add(id);
+
+            let sprite = bomberBlasts.get(id);
+
+            if (!sprite) {
+                sprite = new PIXI.Sprite(
+                    textures.bomberBlast
+                );
+
+                sprite.anchor.set(0.5);
+                explosionLayer.addChild(sprite);
+                bomberBlasts.set(id, sprite);
+            }
+
+            const width =
+                85 +
+                progress * 60;
+
+            const ratio =
+                sprite.texture.height /
+                sprite.texture.width || 1;
+
+            sprite.width = width;
+            sprite.height = width * ratio;
+            sprite.alpha = 1 - progress;
+            sprite.position.set(x, y);
+        }
+
+        for (const [id, sprite] of bomberBlasts) {
+            if (!seen.has(id)) {
+                explosionLayer.removeChild(sprite);
+                sprite.destroy();
+                bomberBlasts.delete(id);
             }
         }
     }
@@ -1063,6 +1403,7 @@ window.alienFarmPixi = (function () {
         syncCoinsFlat(frame.coins);
         syncPowerups(frame.powerups);
         syncExplosionsFlat(frame.explosions);
+        syncBomberBlasts(frame.bomberBlasts);
     }
 
     function clear() {
@@ -1086,6 +1427,7 @@ window.alienFarmPixi = (function () {
         // -----------------------------
         playerBullets.forEach(b => {
             projectileLayer.removeChild(b);
+            b.destroy();
         });
 
         playerBullets.clear();
@@ -1095,9 +1437,20 @@ window.alienFarmPixi = (function () {
         // -----------------------------
         enemyBullets.forEach(b => {
             projectileLayer.removeChild(b);
+            b.destroy();
         });
 
         enemyBullets.clear();
+
+        // -----------------------------
+        // Bomber blast effects
+        // -----------------------------
+        bomberBlasts.forEach(sprite => {
+            explosionLayer.removeChild(sprite);
+            sprite.destroy();
+        });
+
+        bomberBlasts.clear();
 
         // -----------------------------
         // Wobble kernels
