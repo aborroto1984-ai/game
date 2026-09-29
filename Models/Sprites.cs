@@ -56,6 +56,8 @@ public static class Sprites
     public const string HarvesterBeamEmitter = "images/harvester_beam_emitter.png";
     public const string WarMothershipShot = "images/war_mothership_shot.png";
 
+    public const string Parachute = "images/parachute.png";
+
     public static string ForUpgrade(string key) => key switch
     {
         "life" => "images/upgrade_life.png",

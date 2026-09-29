@@ -233,3 +233,21 @@ public class WobbleEggBlast
 
     public double Age { get; set; }
 }
+
+public class ReturningFarmItem
+{
+    public string ItemId { get; set; } =
+        string.Empty;
+
+    public double StartX { get; set; }
+    public double StartY { get; set; }
+
+    public double X { get; set; }
+    public double Y { get; set; }
+
+    public double Vy { get; set; }
+
+    public double Age { get; set; }
+
+    public double SwayOffset { get; set; }
+}

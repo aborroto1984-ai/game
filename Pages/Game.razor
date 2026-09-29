@@ -21,15 +21,42 @@
             class="pixi-game-layer">
     </canvas>
 
-    <div class="hud">
-        <div class="pill">⭐ @score</div>
-        <div class="pill">🪙 @coinsThisRun</div>
-        <div class="pill">🏠 @items.Count(i => i.Safe)/@items.Count</div>
-        <div class="pill">
-            🦃 @(wobbleRageT > 0 ? "RAGE!" : $"{(int)wobbleRageMeter}%")
+    @if (screen == ScreenState.Playing)
+    {
+        <div class="hud">
+
+            <div class="hud-stat">
+                <span>⭐</span>
+                <span>@score</span>
+            </div>
+
+            <div class="hud-stat">
+                <span>🪙</span>
+                <span>@coinsThisRun</span>
+            </div>
+
+            <div class="hud-stat">
+                <span>🏠</span>
+                <span>@items.Count(i => i.Safe)/@items.Count</span>
+            </div>
+
+            <div class="hud-stat hud-rage
+                    @(wobbleRageT > 0 ? "raging" : "")">
+                <span>🦃</span>
+                <span>
+                    @(wobbleRageT > 0
+                                    ? "RAGE!"
+                                    : $"{(int)wobbleRageMeter}%")
+                </span>
+            </div>
+
+            <div class="hud-stat hud-lives">
+                <span>❤️</span>
+                <span>×@lives</span>
+            </div>
+
         </div>
-        <div class="pill">@Hearts()</div>
-    </div>
+    }
 
     @if (screen == ScreenState.Playing && !paused)
     {
@@ -39,6 +66,80 @@
     @if (!string.IsNullOrEmpty(waveBannerMsg))
     {
         <div class="wave-banner">@waveBannerMsg</div>
+    }
+
+    @if ((bossIntroActive ||
+        (bossBattleActive && bossCombatLocked)) &&
+        screen == ScreenState.Playing)
+    {
+        <div class="boss-intro">
+            <div class="boss-intro-warning">
+                MOTHERSHIP INBOUND
+            </div>
+
+            <div class="boss-intro-name">
+                @BossDisplayName(activeBossVariant)
+            </div>
+
+            <div class="boss-intro-subtitle">
+                @BossSubtitle(activeBossVariant)
+            </div>
+        </div>
+    }
+
+    @if ((bossBattleActive ||
+        bossOutroActive) &&
+        ActiveBoss is { } activeBoss)
+    {
+        <div class="boss-hud">
+            <div class="boss-hud-name">
+                @BossDisplayName(
+                activeBoss.BossVariant)
+        </div>
+
+        <div class="boss-health-track">
+            <div class="boss-health-fill"
+                 style="width:@Num(
+                                     Math.Clamp(
+                                         activeBoss.Hp * 100.0 /
+                                         activeBoss.MaxHp,
+                                         0,
+                                         100))%">
+            </div>
+        </div>
+    </div>
+        }
+
+    @if (showWobbleRageBanner)
+    {
+        <div class="wobble-rage-banner">
+            <img src="images/wobble_rage_banner.png"
+                 alt="Wobble Rage!" />
+        </div>
+    }
+
+    @if (screen == ScreenState.Playing &&
+        activeSpeech != null)
+    {
+        <div class="character-speech @GetSpeechSpeakerCss()"
+             style="@GetSpeechBubbleStyle()">
+
+            <img src="images/speech_bubble.png"
+                 class="character-speech-image"
+                 alt="" />
+
+            <div class="character-speech-content">
+
+                <div class="character-speech-speaker">
+                    @GetSpeechSpeakerName()
+                </div>
+
+                <div class="character-speech-text">
+                    @activeSpeech.Text
+                </div>
+
+            </div>
+        </div>
     }
 
     @if (!string.IsNullOrEmpty(toastMsg))
@@ -213,6 +314,60 @@
                                         : "ENABLED")
                     </button>
 
+                    <br />
+                    <br />
+
+                    <b>Boss Testing</b>
+                    <br />
+
+                    <button class="shop-link"
+                            @onclick="() =>
+                                StartBossTest(
+                                    BossVariant.Scout)">
+                        Test Scout
+                    </button>
+
+                    <button class="shop-link"
+                            @onclick="() =>
+                                StartBossTest(
+                                    BossVariant.Harvester)">
+                        Test Harvester
+                    </button>
+
+                    <button class="shop-link"
+                            @onclick="() =>
+                                StartBossTest(
+                                    BossVariant.War)">
+                        Test War
+                    </button>
+
+                    @if (ActiveBoss is not null && bossBattleActive)
+                    {
+                        <br />
+                        <br />
+
+                        <b>Boss Phase</b>
+                        <br />
+
+                        <button class="shop-link"
+                                @onclick="() =>
+                                SetBossTestHealth(0.85)">
+                            Phase 1
+                        </button>
+
+                        <button class="shop-link"
+                                @onclick="() =>
+                                    SetBossTestHealth(0.55)">
+                            Phase 2
+                        </button>
+
+                        <button class="shop-link"
+                                @onclick="() =>
+                                    SetBossTestHealth(0.25)">
+                            Phase 3
+                        </button>
+                    }
+
             @if (diagSpikes.Count > 0)
                     {
                         <br />
@@ -302,7 +457,9 @@
 
     string diagCopyStatus = "";
 
-    double time, difficulty = 1;
+    double time;
+    double waveTime;
+    double difficulty = 1;
     int score, lives;
 
     double farmerX = W / 2, farmerTargetX = W / 2;
@@ -325,10 +482,20 @@
     double wobbleRageMeter;
     double wobbleRageT;
 
+    bool showWobbleRageBanner;
+    bool wobbleRageBannerShown;
+
+    CancellationTokenSource?
+        wobbleRageBannerCts;
+
     const double WobbleRageMoveSpeed = 0.72;
 
     const double WobbleRageDuration = 6000;
     const double WobbleMaxRage = 100;
+
+    // Wobble now gains rage at half the previous rate.
+    // This makes rage feel like a more significant event.
+    const double WobbleRageGainMultiplier = 0.50;
 
     const int MaxWobbleShots = 30;
 
@@ -365,16 +532,79 @@
     const double BomberBlastRadius = 72;
     const double HarvesterBeamDuration = 2200;
 
+    List<ReturningFarmItem> returningItems =
+    new();
+
+    Dictionary<string, double>
+        itemStealCooldowns = new();
+
+    HashSet<string> harvesterStolenItemIds = new();
+
+    const double ParachuteDeployDelay = 180;
+    const double ParachuteFallSpeed = 72;
+    const double ParachuteRecoveryCooldown = 4000;
+
     GameProgress Progress = new();
     int wave = 1, lastWaveTriggered = 1, coinsThisRun = 0;
     int killsSincePowerup;
     bool isNewBest = false;
     const double WaveDurationMs = 25000;
 
+    bool bossIntroActive;
+    bool bossBattleActive;
+    bool bossOutroActive;
+    bool bossCombatLocked;
+    bool bossReadyToFight;
+
+    double bossIntroT;
+    double bossOutroT;
+    double bossOutroElapsed;
+
+    int bossExplosionStep;
+
+    BossVariant activeBossVariant;
+
+    const double BossIntroDuration = 1600;
+    const double BossOutroDuration = 2200;
+
+    bool BossEncounterActive =>
+        bossIntroActive ||
+        bossBattleActive ||
+        bossOutroActive;
+
+    Enemy? ActiveBoss =>
+        enemies.FirstOrDefault(
+            e => e.Type == EnemyType.Boss);
+
     string toastMsg = "";
     string waveBannerMsg = "";
     string endTitle = "";
     string endMsg = "";
+
+    enum SpeechSpeaker
+    {
+        Ted,
+        Wobble
+    }
+
+    sealed class SpeechLine
+    {
+        public SpeechSpeaker Speaker { get; init; }
+
+        public string Text { get; init; } =
+            string.Empty;
+
+        public int DurationMs { get; init; } =
+            2200;
+    }
+
+    SpeechLine? activeSpeech;
+
+    CancellationTokenSource?
+        speechCts;
+
+    const double SpeechBubbleWidth = 165;
+    const double SpeechBubbleHeight = 122;
 
     static readonly (string Id, string Name)[] ItemDefs = new[]
     {
@@ -425,7 +655,7 @@
             ["truck"] = 320,
             ["corn"] = 380,
             ["pumpkin"] = 430,
-            
+
         };
 
         foreach (var item in items)
@@ -519,6 +749,8 @@
                     WarMothershipShot =Sprites.WarMothershipShot,
 
                     BeamColumn = Sprites.FxBeamColumn,
+
+                    Parachute = Sprites.Parachute,
 
                     Items = itemAssets
                 }
@@ -623,6 +855,361 @@
     static string Px(double v) => v.ToString(CultureInfo.InvariantCulture) + "px";
     static string Num(double v) => v.ToString(CultureInfo.InvariantCulture);
 
+    string GetSpeechSpeakerCss()
+    {
+        if (activeSpeech?.Speaker ==
+            SpeechSpeaker.Wobble)
+        {
+            return "wobble";
+        }
+
+        return "ted";
+    }
+
+    string GetSpeechSpeakerName()
+    {
+        return activeSpeech?.Speaker switch
+        {
+            SpeechSpeaker.Wobble =>
+                "WOBBLE",
+
+            _ =>
+                "TED"
+        };
+    }
+
+    string GetSpeechBubbleStyle()
+    {
+        if (activeSpeech == null)
+            return "display:none;";
+
+        double speakerX;
+        double speakerY;
+        double tailPosition;
+
+        if (activeSpeech.Speaker ==
+            SpeechSpeaker.Wobble)
+        {
+            speakerX =
+                wobbleX;
+
+            // Aim the tail roughly at Wobble's head.
+            speakerY =
+                wobbleY - 42;
+
+            // Bubble image is horizontally flipped
+            // for Wobble, so its tail moves left.
+            tailPosition =
+                0.37;
+        }
+        else
+        {
+            speakerX =
+                farmerX;
+
+            // Aim the tail roughly at Ted's head.
+            speakerY =
+                farmerY - 48;
+
+            tailPosition =
+                0.63;
+        }
+
+        double left =
+            speakerX -
+            SpeechBubbleWidth *
+            tailPosition;
+
+        left =
+            Math.Clamp(
+                left,
+                8,
+                W -
+                SpeechBubbleWidth -
+                8);
+
+        double top =
+            speakerY -
+            SpeechBubbleHeight;
+
+        top =
+            Math.Clamp(
+                top,
+                75,
+                H -
+                SpeechBubbleHeight -
+                90);
+
+        return
+            $"left:{Num(left)}px;" +
+            $"top:{Num(top)}px;";
+    }
+
+    static SpeechLine Say(
+    SpeechSpeaker speaker,
+    string text,
+    int durationMs = 2200)
+    {
+        return new SpeechLine
+        {
+            Speaker = speaker,
+            Text = text,
+            DurationMs = durationMs
+        };
+    }
+
+    void CancelSpeech()
+    {
+        speechCts?.Cancel();
+
+        speechCts = null;
+        activeSpeech = null;
+    }
+
+    async Task PlaySpeechSequenceAsync(
+        int initialDelayMs,
+        params SpeechLine[] lines)
+    {
+        // A major event should replace any dialogue
+        // currently being shown.
+        speechCts?.Cancel();
+
+        var cts =
+            new CancellationTokenSource();
+
+        speechCts =
+            cts;
+
+        try
+        {
+            if (initialDelayMs > 0)
+            {
+                await Task.Delay(
+                    initialDelayMs,
+                    cts.Token);
+            }
+
+            foreach (var line in lines)
+            {
+                if (screen !=
+                    ScreenState.Playing)
+                {
+                    break;
+                }
+
+                activeSpeech =
+                    line;
+
+                await InvokeAsync(
+                    StateHasChanged);
+
+                await Task.Delay(
+                    line.DurationMs,
+                    cts.Token);
+
+                activeSpeech =
+                    null;
+
+                await InvokeAsync(
+                    StateHasChanged);
+
+                // Tiny conversational pause between
+                // Ted and Wobble.
+                await Task.Delay(
+                    140,
+                    cts.Token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Another event replaced the dialogue.
+        }
+        finally
+        {
+            // An older sequence must never erase
+            // a newer one.
+            if (ReferenceEquals(
+                    speechCts,
+                    cts))
+            {
+                speechCts = null;
+                activeSpeech = null;
+
+                await InvokeAsync(
+                    StateHasChanged);
+            }
+
+            cts.Dispose();
+        }
+    }
+
+    Task PlayIntroDialogueAsync()
+    {
+        return PlaySpeechSequenceAsync(
+            650,
+
+            Say(
+                SpeechSpeaker.Ted,
+                "Wobble... we got company.",
+                2100),
+
+            Say(
+                SpeechSpeaker.Wobble,
+                "I hope they hate corn.",
+                2200));
+    }
+
+    Task PlayBossDialogueAsync(
+        BossVariant variant)
+    {
+        return variant switch
+        {
+            BossVariant.Harvester =>
+                PlaySpeechSequenceAsync(
+                    150,
+
+                    Say(
+                        SpeechSpeaker.Ted,
+                        "That thing's here for the whole farm!",
+                        2200),
+
+                    Say(
+                        SpeechSpeaker.Wobble,
+                        "Then it's leaving empty-handed.",
+                        2200)),
+
+            BossVariant.War =>
+                PlaySpeechSequenceAsync(
+                    150,
+
+                    Say(
+                        SpeechSpeaker.Ted,
+                        "Wobble... that one's got guns.",
+                        2200),
+
+                    Say(
+                        SpeechSpeaker.Wobble,
+                        "So do we. Emotionally.",
+                        2300)),
+
+            _ =>
+                PlaySpeechSequenceAsync(
+                    150,
+
+                    Say(
+                        SpeechSpeaker.Ted,
+                        "That's a lot bigger than the others.",
+                        2200),
+
+                    Say(
+                        SpeechSpeaker.Wobble,
+                        "Aim for the expensive-looking parts.",
+                        2300))
+        };
+    }
+
+    async Task StartBossTest(BossVariant variant)
+    {
+        // Cancel any encounter currently running.
+        bossIntroActive = false;
+        bossBattleActive = false;
+        bossOutroActive = false;
+        bossCombatLocked = false;
+
+        bossIntroT = 0;
+        bossOutroT = 0;
+        bossOutroElapsed = 0;
+
+        bossExplosionStep = 0;
+
+        enemies.Clear();
+
+        harvesterStolenItemIds.Clear();
+
+        ClearBossCombatProjectiles();
+
+        powerups.Clear();
+        coinPickups.Clear();
+
+        // Use the real wave associated
+        // with each mothership so HP and
+        // difficulty match normal gameplay.
+        wave =
+            variant switch
+            {
+                BossVariant.Scout =>
+                    5,
+
+                BossVariant.Harvester =>
+                    10,
+
+                BossVariant.War =>
+                    15,
+
+                _ =>
+                    5
+            };
+
+        lastWaveTriggered =
+            wave;
+
+        waveTime =
+            (wave - 1) *
+            WaveDurationMs;
+
+        activeBossVariant =
+            variant;
+
+        bossIntroActive = true;
+        bossBattleActive = false;
+        bossOutroActive = false;
+        bossCombatLocked = true;
+
+        bossIntroT =
+            BossIntroDuration;
+
+        paused = false;
+
+        await ResumeMusic();
+
+        await InvokeAsync(
+            StateHasChanged);
+    }
+
+    void SetBossTestHealth(double percent)
+    {
+        var boss =
+            ActiveBoss;
+
+        if (boss == null)
+            return;
+
+        percent =
+            Math.Clamp(
+                percent,
+                0.01,
+                1.0);
+
+        boss.Hp =
+            Math.Max(
+                1,
+                (int)Math.Ceiling(
+                    boss.MaxHp *
+                    percent));
+
+        // Clear the previous phase's attack
+        // so we can see the new pattern cleanly.
+        ClearBossCombatProjectiles();
+
+        boss.ShootTimer = 0;
+
+        if (boss.BossVariant ==
+            BossVariant.Harvester)
+        {
+            boss.HoverTimer = 0;
+        }
+    }
+
     void OnKeyDown(KeyboardEventArgs e)
     {
         if (e.Key is "ArrowLeft" or "a" or "A") keyLeft = true;
@@ -649,6 +1236,7 @@
 
         // Reset game state
         time = 0;
+        waveTime = 0;
         difficulty = 1;
         score = 0;
         lives = 4 + Progress.LifeLevel;
@@ -677,10 +1265,27 @@
         wobbleRageMeter = 0;
         wobbleRageT = 0;
 
+        showWobbleRageBanner = false;
+        wobbleRageBannerShown = false;
+
+        wobbleRageBannerCts?.Cancel();
+
         wobbleShots.Clear();
         wobbleEggs.Clear();
         wobbleEggBlasts.Clear();
         bomberBlasts.Clear();
+
+        bossReadyToFight = false;
+        bossIntroActive = false;
+        bossBattleActive = false;
+        bossOutroActive = false;
+        bossCombatLocked = false;
+
+        bossIntroT = 0;
+        bossOutroT = 0;
+        bossOutroElapsed = 0;
+
+        bossExplosionStep = 0;
 
         keyLeft = keyRight = false;
 
@@ -711,6 +1316,10 @@
         enemies.Clear();
         powerups.Clear();
         coinPickups.Clear();
+        returningItems.Clear();
+        itemStealCooldowns.Clear();
+        harvesterStolenItemIds.Clear();
+        CancelSpeech();
 
         foreach (var it in items)
         {
@@ -729,6 +1338,8 @@
         screen = ScreenState.Playing;
 
         StateHasChanged();
+
+        _ = PlayIntroDialogueAsync();
 
         _ = PlayMusic(
             rng.Next(2) == 0
@@ -789,7 +1400,23 @@
                 double updateStart =
                     clock.Elapsed.TotalMilliseconds;
 
-                Update(dt);
+                double gameDt =
+                    showWobbleRageBanner
+                        ? dt * 0.40
+                        : dt;
+
+                Update(gameDt);
+
+                // Update() may have ended the game.
+                // Render the final state immediately and
+                // do not continue processing this frame.
+                if (screen != ScreenState.Playing)
+                {
+                    await InvokeAsync(
+                        StateHasChanged);
+
+                    break;
+                }
 
                 double updateMs =
                     clock.Elapsed.TotalMilliseconds -
@@ -871,15 +1498,56 @@
         }
     }
 
+    void CheckFarmLost()
+    {
+        bool anythingSafe =
+            items.Any(
+                item => item.Safe);
+
+        if (anythingSafe)
+            return;
+
+        // An item currently floating back down
+        // can still save the farm.
+        if (returningItems.Count > 0)
+            return;
+
+        // A thief still on-screen carrying something
+        // can still be shot down.
+        bool recoverableStolenItem =
+            enemies.Any(
+                enemy =>
+                    enemy.Type ==
+                        EnemyType.Thief &&
+                    enemy.StolenItemId != null)
+            ||
+            harvesterStolenItemIds.Count > 0;
+
+        if (recoverableStolenItem)
+            return;
+
+        EndGame(
+            items: true);
+    }
+
     void Update(double dt)
     {
         time += dt;
 
+        // The main game keeps animating during boss battles,
+        // but normal wave progression stops.
+        if (!BossEncounterActive)
+        {
+            waveTime += dt;
+        }
+
         int currentWave =
-            1 + (int)(time / WaveDurationMs);
+            1 + (int)(
+                waveTime /
+                WaveDurationMs);
 
         double waveProgress =
-            (time % WaveDurationMs) /
+            (waveTime % WaveDurationMs) /
             WaveDurationMs;
 
         // Smooth difficulty increase both between
@@ -900,13 +1568,27 @@
 
         if (currentWave > lastWaveTriggered)
         {
-            lastWaveTriggered = currentWave;
-            wave = currentWave;
-            WaveBanner(wave % 5 == 0 ? $"⚠ WAVE {wave} — MOTHERSHIP INBOUND ⚠" : $"WAVE {wave}");
-            _ = PlaySfx("sfx_wave_start.wav");
-            if (wave % 5 == 0 && !enemies.Any(e => e.Type == EnemyType.Boss))
-                SpawnBoss();
+            lastWaveTriggered =
+                currentWave;
+
+            wave =
+                currentWave;
+
+            if (wave % 5 == 0)
+            {
+                BeginBossEncounter();
+            }
+            else
+            {
+                WaveBanner(
+                    $"WAVE {wave}");
+
+                _ = PlaySfx(
+                    "sfx_wave_start.wav");
+            }
         }
+
+        UpdateBossEncounter(dt);
 
         if (shieldT > 0) shieldT -= dt;
         if (rapidT > 0) rapidT -= dt;
@@ -922,48 +1604,52 @@
         farmerX += (farmerTargetX - farmerX) * Math.Min(1, dt / 90);
 
         fireTimer -= dt;
-        if (flameT > 0)
+
+        if (!bossCombatLocked)
         {
-            if (fireTimer <= 0)
+            if (flameT > 0)
             {
-                fireTimer = 55;
-                if (bullets.Count < MaxPlayerBullets)
+                if (fireTimer <= 0)
                 {
-                    double fy = farmerY - 38;
-                    for (int s = 0; s < 2; s++)
+                    fireTimer = 55;
+                    if (bullets.Count < MaxPlayerBullets)
                     {
-                        double spread = (rng.NextDouble() - 0.5) * 0.32;
-                        bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = spread, Vy = -0.44 - rng.NextDouble() * 0.08, IsFlame = true });
+                        double fy = farmerY - 38;
+                        for (int s = 0; s < 2; s++)
+                        {
+                            double spread = (rng.NextDouble() - 0.5) * 0.32;
+                            bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = spread, Vy = -0.44 - rng.NextDouble() * 0.08, IsFlame = true });
+                        }
                     }
-                }
-                flameSfxTimer -= 55;
-                if (flameSfxTimer <= 0)
-                {
-                    flameSfxTimer = 180;
-                    _ = PlaySfx("sfx_bullet.mp3", 0.22);
+                    flameSfxTimer -= 55;
+                    if (flameSfxTimer <= 0)
+                    {
+                        flameSfxTimer = 180;
+                        _ = PlaySfx("sfx_bullet.mp3", 0.22);
+                    }
                 }
             }
-        }
-        else
-        {
-            double rate = rapidT > 0 ? fireRate * 0.45 : fireRate;
-            if (fireTimer <= 0)
+            else
             {
-                fireTimer = rate;
-                if (bullets.Count < MaxPlayerBullets)
+                double rate = rapidT > 0 ? fireRate * 0.45 : fireRate;
+                if (fireTimer <= 0)
                 {
-                    double fy = farmerY - 38;
-                    if (wideT > 0)
+                    fireTimer = rate;
+                    if (bullets.Count < MaxPlayerBullets)
                     {
-                        bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0, Vy = -0.42 });
-                        bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = -0.14, Vy = -0.4 });
-                        bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0.14, Vy = -0.4 });
+                        double fy = farmerY - 38;
+                        if (wideT > 0)
+                        {
+                            bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0, Vy = -0.42 });
+                            bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = -0.14, Vy = -0.4 });
+                            bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0.14, Vy = -0.4 });
+                        }
+                        else
+                        {
+                            bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0, Vy = -0.46 });
+                        }
+                        _ = PlaySfx("sfx_bullet.mp3", 0.35);
                     }
-                    else
-                    {
-                        bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0, Vy = -0.46 });
-                    }
-                    _ = PlaySfx("sfx_bullet.mp3", 0.35);
                 }
             }
         }
@@ -1000,38 +1686,41 @@
             }
         }
 
-        spawnTimer -= dt;
-
-        if (spawnTimer <= 0)
+        if (!BossEncounterActive)
         {
-            spawnTimer = spawnInterval;
+            spawnTimer -= dt;
 
-            int spawnCount = 1;
-
-            // The invasion becomes denser as waves increase.
-            if (wave >= 3 &&
-                rng.NextDouble() < 0.35)
+            if (spawnTimer <= 0)
             {
-                spawnCount++;
-            }
+                spawnTimer = spawnInterval;
 
-            if (wave >= 6 &&
-                rng.NextDouble() < 0.40)
-            {
-                spawnCount++;
-            }
+                int spawnCount = 1;
 
-            if (wave >= 10 &&
-                rng.NextDouble() < 0.30)
-            {
-                spawnCount++;
-            }
+                // The invasion becomes denser as waves increase.
+                if (wave >= 3 &&
+                    rng.NextDouble() < 0.30)
+                {
+                    spawnCount++;
+                }
 
-            for (int i = 0;
-                 i < spawnCount;
-                 i++)
-            {
-                SpawnEnemy();
+                if (wave >= 8 &&
+                    rng.NextDouble() < 0.25)
+                {
+                    spawnCount++;
+                }
+
+                if (wave >= 10 &&
+                    rng.NextDouble() < 0.30)
+                {
+                    spawnCount++;
+                }
+
+                for (int i = 0;
+                     i < spawnCount;
+                     i++)
+                {
+                    SpawnEnemy();
+                }
             }
         }
 
@@ -1127,9 +1816,44 @@
                 }
             }
         }
-        enemies.RemoveAll(en => en.Y < -80 || en.Y > H + 40);
+        for (int i = enemies.Count - 1; i >= 0; i--)
+        {
+            var enemy =
+                enemies[i];
+
+            bool escapedTop =
+                enemy.Type ==
+                    EnemyType.Boss
+                    ? enemy.Y < -180
+                    : enemy.Y < -80;
+
+            bool escapedBottom =
+                enemy.Y >
+                H + 40;
+
+            if (!escapedTop &&
+                !escapedBottom)
+            {
+                continue;
+            }
+
+            bool thiefEscapedWithItem =
+                escapedTop &&
+                enemy.Type ==
+                    EnemyType.Thief &&
+                enemy.StolenItemId != null;
+
+            enemies.RemoveAt(i);
+
+            if (thiefEscapedWithItem)
+            {
+                CheckFarmLost();
+            }
+        }
 
         UpdateWobble(dt);
+
+        UpdateReturningItems(dt);
 
         foreach (var p in powerups) p.Y += p.Vy * dt / 1000;
         powerups.RemoveAll(p => p.Y > H + 30);
@@ -1221,22 +1945,25 @@
         }
 
         // collisions: enemy body vs farmer
-        for (int i = enemies.Count - 1; i >= 0; i--)
+        if (!bossCombatLocked)
         {
-            var en = enemies[i];
-            double dx = en.X - farmerX;
-
-            double dy =
-                en.Y - farmerY;
-
-            double hitRadius =
-                GetEnemyHitRadius(en) + 20;
-
-            if (dx * dx + dy * dy <
-                hitRadius * hitRadius)
+            for (int i = enemies.Count - 1; i >= 0; i--)
             {
-                enemies.RemoveAt(i);
-                Hurt();
+                var en = enemies[i];
+                double dx = en.X - farmerX;
+
+                double dy =
+                    en.Y - farmerY;
+
+                double hitRadius =
+                    GetEnemyHitRadius(en) + 20;
+
+                if (dx * dx + dy * dy <
+                    hitRadius * hitRadius)
+                {
+                    enemies.RemoveAt(i);
+                    Hurt();
+                }
             }
         }
 
@@ -1250,6 +1977,28 @@
                 powerups.RemoveAt(i);
                 ApplyPowerup(p);
             }
+        }
+
+        if (bossCombatLocked)
+        {
+            ClearBossCombatProjectiles();
+        }
+
+        if (bossReadyToFight)
+        {
+            bossReadyToFight = false;
+            bossCombatLocked = false;
+
+            fireTimer = 0;
+            wobbleFireTimer = 0;
+
+            wobbleEggTimer =
+                Math.Min(
+                    wobbleEggTimer,
+                    900);
+
+            WaveBanner(
+                "⚠ FIGHT! ⚠");
         }
     }
 
@@ -1442,8 +2191,156 @@
             1000;
     }
 
+    int GetBossPhase(Enemy en)
+    {
+        if (en.MaxHp <= 0)
+            return 1;
+
+        double healthPercent =
+            en.Hp /
+            (double)en.MaxHp;
+
+        if (healthPercent > 0.65)
+            return 1;
+
+        if (healthPercent > 0.30)
+            return 2;
+
+        return 3;
+    }
+
+    void FireBossSpread(
+    Enemy en,
+    int shotCount,
+    double spread,
+    double verticalSpeed,
+    EnemyProjectileKind kind =
+        EnemyProjectileKind.Standard)
+    {
+        if (enemyBullets.Count +
+            shotCount >
+            MaxEnemyBullets)
+        {
+            return;
+        }
+
+        double centerAim =
+            (farmerX - en.X) *
+            0.00035;
+
+        double middle =
+            (shotCount - 1) /
+            2.0;
+
+        for (int i = 0;
+             i < shotCount;
+             i++)
+        {
+            double offset =
+                (i - middle) *
+                spread;
+
+            enemyBullets.Add(
+                new Bullet
+                {
+                    X = en.X,
+                    Y = en.Y + 35,
+
+                    Vx =
+                        centerAim +
+                        offset,
+
+                    Vy =
+                        verticalSpeed,
+
+                    EnemyKind =
+                        kind
+                });
+        }
+    }
+
+    void FireBossAimedBurst(
+        Enemy en,
+        int shotCount,
+        double speed,
+        double spread,
+        EnemyProjectileKind kind =
+            EnemyProjectileKind.Standard)
+    {
+        if (enemyBullets.Count +
+            shotCount >
+            MaxEnemyBullets)
+        {
+            return;
+        }
+
+        double startX =
+            en.X;
+
+        double startY =
+            en.Y + 35;
+
+        double dx =
+            farmerX -
+            startX;
+
+        double dy =
+            farmerY -
+            startY;
+
+        double distance =
+            Math.Sqrt(
+                dx * dx +
+                dy * dy);
+
+        if (distance <= 0.001)
+            return;
+
+        double baseVx =
+            dx /
+            distance *
+            speed;
+
+        double baseVy =
+            dy /
+            distance *
+            speed;
+
+        double middle =
+            (shotCount - 1) /
+            2.0;
+
+        for (int i = 0;
+             i < shotCount;
+             i++)
+        {
+            enemyBullets.Add(
+                new Bullet
+                {
+                    X = startX,
+                    Y = startY,
+
+                    Vx =
+                        baseVx +
+                        (i - middle) *
+                        spread,
+
+                    Vy =
+                        baseVy,
+
+                    EnemyKind =
+                        kind
+                });
+        }
+    }
+
     void UpdateBoss(Enemy en, double dt)
     {
+        // During the destruction cinematic,
+        // UpdateBossEncounter owns the boss.
+        if (bossOutroActive)
+            return;
+
         en.X +=
             Math.Sin(en.Phase * 0.7) *
             14 *
@@ -1466,9 +2363,16 @@
 
             if (en.Y >= en.PatrolY)
             {
-                en.Y = en.PatrolY;
+                en.Y =
+                    en.PatrolY;
+
                 en.State =
                     EnemyState.Hovering;
+
+                if (bossCombatLocked)
+                {
+                    bossReadyToFight = true;
+                }
             }
 
             return;
@@ -1509,34 +2413,92 @@
         if (en.ShootTimer > 0)
             return;
 
-        en.ShootTimer =
-            1300 +
-            rng.NextDouble() * 400;
+        int phase =
+            GetBossPhase(en);
 
-        if (enemyBullets.Count >=
-            MaxEnemyBullets)
-            return;
+        int attackNumber =
+            (int)en.HoverTimer;
 
-        for (int s = -1;
-             s <= 1;
-             s++)
+        en.HoverTimer++;
+
+        // -----------------------------
+        // PHASE 1
+        // Classic three-shot spread.
+        // -----------------------------
+        if (phase == 1)
         {
-            enemyBullets.Add(
-                new Bullet
-                {
-                    X = en.X,
-                    Y = en.Y + 35,
+            en.ShootTimer =
+                1200 +
+                rng.NextDouble() *
+                300;
 
-                    Vx =
-                        s * 0.10 +
-                        (farmerX - en.X) *
-                        0.0004,
+            FireBossSpread(
+                en,
+                3,
+                0.10,
+                0.20);
 
-                    Vy = 0.19,
+            return;
+        }
 
-                    EnemyKind =
-                        EnemyProjectileKind.Standard
-                });
+        // -----------------------------
+        // PHASE 2
+        // Alternates spread and
+        // tightly aimed bursts.
+        // -----------------------------
+        if (phase == 2)
+        {
+            en.ShootTimer =
+                900 +
+                rng.NextDouble() *
+                250;
+
+            if (attackNumber % 2 == 0)
+            {
+                FireBossSpread(
+                    en,
+                    3,
+                    0.11,
+                    0.22);
+            }
+            else
+            {
+                FireBossAimedBurst(
+                    en,
+                    3,
+                    0.25,
+                    0.045);
+            }
+
+            return;
+        }
+
+        // -----------------------------
+        // PHASE 3
+        // Scout panics:
+        // five-shot spreads mixed with
+        // fast aimed volleys.
+        // -----------------------------
+        en.ShootTimer =
+            650 +
+            rng.NextDouble() *
+            180;
+
+        if (attackNumber % 2 == 0)
+        {
+            FireBossSpread(
+                en,
+                5,
+                0.075,
+                0.24);
+        }
+        else
+        {
+            FireBossAimedBurst(
+                en,
+                3,
+                0.29,
+                0.055);
         }
     }
 
@@ -1547,34 +2509,194 @@
         if (en.ShootTimer > 0)
             return;
 
-        en.ShootTimer =
-            900 +
-            rng.NextDouble() * 350;
+        int phase =
+            GetBossPhase(en);
 
-        if (enemyBullets.Count >=
-            MaxEnemyBullets)
+        int attackNumber =
+            (int)en.HoverTimer;
+
+        en.HoverTimer++;
+
+        // -----------------------------
+        // PHASE 1
+        // Heavy aimed cannon.
+        // -----------------------------
+        if (phase == 1)
+        {
+            en.ShootTimer =
+                950 +
+                rng.NextDouble() *
+                250;
+
+            FireBossAimedBurst(
+                en,
+                1,
+                0.21,
+                0,
+                EnemyProjectileKind
+                    .WarMothership);
+
+            return;
+        }
+
+        // -----------------------------
+        // PHASE 2
+        // Heavy cannon alternates with
+        // three-shot suppression fire.
+        // -----------------------------
+        if (phase == 2)
+        {
+            en.ShootTimer =
+                760 +
+                rng.NextDouble() *
+                220;
+
+            if (attackNumber % 2 == 0)
+            {
+                FireBossAimedBurst(
+                    en,
+                    1,
+                    0.23,
+                    0,
+                    EnemyProjectileKind
+                        .WarMothership);
+            }
+            else
+            {
+                FireBossSpread(
+                    en,
+                    3,
+                    0.075,
+                    0.23);
+            }
+
+            return;
+        }
+
+        // -----------------------------
+        // PHASE 3
+        // Full weapons:
+        // heavy cannon followed by
+        // large suppression barrages.
+        // -----------------------------
+        en.ShootTimer =
+            580 +
+            rng.NextDouble() *
+            180;
+
+        if (attackNumber % 2 == 0)
+        {
+            FireBossAimedBurst(
+                en,
+                1,
+                0.26,
+                0,
+                EnemyProjectileKind
+                    .WarMothership);
+
+            FireBossSpread(
+                en,
+                2,
+                0.11,
+                0.22);
+        }
+        else
+        {
+            FireBossSpread(
+                en,
+                5,
+                0.065,
+                0.25);
+        }
+    }
+
+    double GetHarvesterBeamDuration(Enemy en)
+    {
+        return GetBossPhase(en) switch
+        {
+            1 =>
+                HarvesterBeamDuration,
+
+            2 =>
+                1800,
+
+            _ =>
+                1400
+        };
+    }
+
+    double GetHarvesterTargetCooldown(
+        Enemy en)
+    {
+        return GetBossPhase(en) switch
+        {
+            1 =>
+                2200 +
+                rng.NextDouble() *
+                1100,
+
+            2 =>
+                1400 +
+                rng.NextDouble() *
+                700,
+
+            _ =>
+                800 +
+                rng.NextDouble() *
+                500
+        };
+    }
+
+    void UpdateHarvesterDefense(
+        Enemy en,
+        double dt)
+    {
+        int phase =
+            GetBossPhase(en);
+
+        // Phase 1:
+        // Harvester concentrates completely
+        // on stealing the farm.
+        if (phase == 1)
             return;
 
-        enemyBullets.Add(
-            new Bullet
-            {
-                X = en.X,
-                Y = en.Y + 40,
+        en.HoverTimer -= dt;
 
-                Vx =
-                    (farmerX - en.X) *
-                    0.00038,
+        if (en.HoverTimer > 0)
+            return;
 
-                Vy = 0.18,
+        if (phase == 2)
+        {
+            en.HoverTimer =
+                1100 +
+                rng.NextDouble() *
+                250;
 
-                EnemyKind =
-                    EnemyProjectileKind
-                        .WarMothership
-            });
+            FireBossSpread(
+                en,
+                3,
+                0.07,
+                0.20);
+
+            return;
+        }
+
+        en.HoverTimer =
+            700 +
+            rng.NextDouble() *
+            180;
+
+        FireBossSpread(
+            en,
+            5,
+            0.055,
+            0.22);
     }
 
     void UpdateHarvesterBoss(Enemy en, double dt)
     {
+        UpdateHarvesterDefense(en, dt);
+
         if (en.State == EnemyState.Beaming)
         {
             en.X +=
@@ -1585,23 +2707,27 @@
 
             en.BeamElapsed += dt;
 
-            if (en.BeamElapsed >= HarvesterBeamDuration)
+            if (en.BeamElapsed >= GetHarvesterBeamDuration(en))
             {
                 StealTargetItem(en);
 
-                // The farm item stays stolen,
-                // but the boss is not physically
-                // carrying it like a Thief does.
+                // The Harvester stores everything it
+                // abducts internally until it is destroyed.
+                if (en.StolenItemId != null)
+                {
+                    harvesterStolenItemIds.Add(
+                        en.StolenItemId);
+                }
+
+                // Unlike a normal Thief, the Harvester
+                // doesn't visually carry one particular item.
                 en.StolenItemId = null;
                 en.TargetItemId = null;
 
                 en.State =
                     EnemyState.Hovering;
 
-                en.ShootTimer =
-                    2200 +
-                    rng.NextDouble() *
-                    1100;
+                en.ShootTimer = GetHarvesterTargetCooldown(en);
             }
 
             return;
@@ -1659,11 +2785,11 @@
                 .ToHashSet();
 
         var targets =
-            items
-                .Where(i =>
-                    i.Safe &&
-                    !alreadyTargeted.Contains(i.Id))
-                .ToList();
+             items
+                 .Where(i =>
+                     CanStealItem(i) &&
+                     !alreadyTargeted.Contains(i.Id))
+                 .ToList();
 
         if (targets.Count == 0)
             return;
@@ -1851,9 +2977,11 @@
         // Kernel gun
         // ---------------------------------
 
-        if (target != null &&
+        if (!bossCombatLocked &&
+            target != null &&
             wobbleFireTimer <= 0 &&
-            wobbleShots.Count < MaxWobbleShots)
+            wobbleShots.Count <
+                MaxWobbleShots)
         {
             wobbleFireTimer =
                 raging
@@ -1867,7 +2995,8 @@
         // Eggstrike
         // ---------------------------------
 
-        if (target != null &&
+        if (!bossCombatLocked &&
+            target != null &&
             wobbleEggTimer <= 0)
         {
             // Don't waste eggs on a single normal fighter.
@@ -2139,6 +3268,36 @@
         }
     }
 
+    void BeginBossOutro(Enemy boss)
+    {
+        if (bossOutroActive)
+            return;
+
+        boss.Hp = 0;
+
+        bossBattleActive = false;
+        bossOutroActive = true;
+
+        bossCombatLocked = true;
+
+        bossOutroT =
+            BossOutroDuration;
+
+        bossOutroElapsed = 0;
+        bossExplosionStep = 0;
+
+        score += 250;
+
+        DropCoinMaybe(
+            boss.X,
+            boss.Y,
+            1.0,
+            15);
+
+        AddWobbleRage(
+            15);
+    }
+
     void DamageEnemy(int enemyIndex, int damage, bool fromWobble)
     {
         if (enemyIndex < 0 ||
@@ -2194,6 +3353,14 @@
         // ---------------------------------
         // Enemy died
         // ---------------------------------
+        if (enemy.Type ==
+            EnemyType.Boss)
+            {
+                BeginBossOutro(
+                    enemy);
+
+                return;
+            }
 
         enemies.RemoveAt(enemyIndex);
 
@@ -2208,12 +3375,15 @@
 
             if (rescued != null)
             {
-                rescued.Safe = true;
+                StartItemReturn(
+                    rescued,
+                    enemy.X,
+                    enemy.Y);
 
                 Toast(
                     fromWobble
-                        ? $"Wobble rescued {rescued.Name}! 🦃"
-                        : $"Rescued {rescued.Name}! 🎉");
+                        ? $"Wobble saved {rescued.Name}! 🦃🪂"
+                        : $"{rescued.Name} is coming back! 🪂");
             }
         }
 
@@ -2295,27 +3465,6 @@
 
                 break;
 
-            case EnemyType.Boss:
-
-                score += 150;
-
-                DropCoinMaybe(
-                    enemy.X,
-                    enemy.Y,
-                    1.0,
-                    12);
-
-                WaveBanner(
-                    "👽 MOTHERSHIP DESTROYED! 👽");
-
-                SpawnExplosion(
-                    enemy.X,
-                    enemy.Y,
-                    ExplosionSize.Large);
-
-                AddWobbleRage(15);
-
-                break;
 
             default:
 
@@ -2390,34 +3539,104 @@
         return 7;
     }
 
-    void AddWobbleRage(double amount)
+    void ShowWobbleRageBanner()
+    {
+        if (wobbleRageBannerShown)
+            return;
+
+        wobbleRageBannerShown = true;
+        showWobbleRageBanner = true;
+
+        wobbleRageBannerCts?.Cancel();
+
+        wobbleRageBannerCts =
+            new CancellationTokenSource();
+
+        var token =
+            wobbleRageBannerCts.Token;
+
+        _ = Task.Delay(
+                3300,
+                token)
+            .ContinueWith(
+                t =>
+                {
+                    if (t.IsCanceled)
+                        return;
+
+                    showWobbleRageBanner = false;
+
+                    _ = InvokeAsync(
+                        StateHasChanged);
+                },
+                TaskScheduler.Default);
+
+        _ = InvokeAsync(
+            StateHasChanged);
+    }
+
+    void AddWobbleRage(
+    double amount)
     {
         if (wobbleRageT > 0)
             return;
 
-        wobbleRageMeter = Math.Min(
-            WobbleMaxRage,
-            wobbleRageMeter + amount);
+        double adjustedAmount =
+            amount *
+            WobbleRageGainMultiplier;
 
-        if (wobbleRageMeter < WobbleMaxRage)
+        wobbleRageMeter =
+            Math.Min(
+                WobbleMaxRage,
+                wobbleRageMeter +
+                adjustedAmount);
+
+        if (wobbleRageMeter <
+            WobbleMaxRage)
+        {
             return;
+        }
 
-        wobbleRageMeter = WobbleMaxRage;
-        wobbleRageT = WobbleRageDuration;
+        wobbleRageMeter =
+            WobbleMaxRage;
+
+        wobbleRageT =
+            WobbleRageDuration;
 
         wobbleFireTimer = 0;
 
         // Let him throw an egg almost immediately.
-        wobbleEggTimer = Math.Min(
-            wobbleEggTimer,
-            500);
+        wobbleEggTimer =
+            Math.Min(
+                wobbleEggTimer,
+                500);
 
-        WaveBanner("🦃 WOBBLE HAS HAD ENOUGH 🦃");
+        // Only flies across the screen the
+        // first time Wobble rages this run.
+        ShowWobbleRageBanner();
 
         _ = PlayTemporaryMusic(
             "sfx_wobble_rage.mp3",
             0.75,
             2.0);
+    }
+
+    bool IsItemStealProtected(string itemId)
+    {
+        return
+            itemStealCooldowns
+                .TryGetValue(
+                    itemId,
+                    out double remaining) &&
+            remaining > 0;
+    }
+
+    bool CanStealItem(FarmItem item)
+    {
+        return
+            item.Safe &&
+            !IsItemStealProtected(
+                item.Id);
     }
 
     void SpawnEnemy()
@@ -2443,7 +3662,7 @@
         var availableTargets =
             items
                 .Where(i =>
-                    i.Safe &&
+                    CanStealItem(i) &&
                     !alreadyTargeted.Contains(i.Id))
                 .ToList();
 
@@ -2659,20 +3878,402 @@
         enemies.Add(en);
     }
 
-    void SpawnBoss()
+    BossVariant GetBossVariantForWave(
+    int waveNumber)
     {
         int bossNumber =
             Math.Max(
                 1,
-                wave / 5);
+                waveNumber / 5);
 
-        BossVariant variant =
+        return
             (BossVariant)(
                 (bossNumber - 1) % 3);
+    }
+
+    string BossDisplayName(
+        BossVariant variant)
+    {
+        return variant switch
+        {
+            BossVariant.Harvester =>
+                "HARVESTER MOTHERSHIP",
+
+            BossVariant.War =>
+                "WAR MOTHERSHIP",
+
+            _ =>
+                "SCOUT MOTHERSHIP"
+        };
+    }
+
+    string BossSubtitle(
+        BossVariant variant)
+    {
+        return variant switch
+        {
+            BossVariant.Harvester =>
+                "IT CAME FOR THE FARM",
+
+            BossVariant.War =>
+                "SURVIVE.",
+
+            _ =>
+                "THE INVASION COMMANDER HAS ARRIVED"
+        };
+    }
+
+    void ClearBossCombatProjectiles()
+    {
+        bullets.Clear();
+        enemyBullets.Clear();
+
+        wobbleShots.Clear();
+        wobbleEggs.Clear();
+        wobbleEggBlasts.Clear();
+
+        bomberBlasts.Clear();
+    }
+
+    void BeginBossEncounter()
+    {
+        if (BossEncounterActive)
+            return;
+
+        activeBossVariant =
+            GetBossVariantForWave(
+                wave);
+
+        bossIntroActive = true;
+        bossBattleActive = false;
+        bossOutroActive = false;
+
+        bossCombatLocked = true;
+
+        bossIntroT =
+            BossIntroDuration;
+
+        _ = PlayBossDialogueAsync(activeBossVariant);
+
+        ClearBossCombatProjectiles();
+
+        // Every normal alien abandons the battlefield.
+        foreach (var enemy in enemies)
+        {
+            if (enemy.Type ==
+                EnemyType.Boss)
+            {
+                continue;
+            }
+
+            enemy.State =
+                EnemyState.Fleeing;
+
+            enemy.Vy =
+                -Math.Max(
+                    420,
+                    Math.Abs(enemy.Vy) *
+                    2.5);
+
+            // Cancel an active abduction.
+            enemy.TargetItemId = null;
+            enemy.BeamElapsed = 0;
+        }
+
+        _ = PlaySfx(
+            "sfx_wave_start.wav");
+    }
+
+    void UpdateReturningItems(
+    double dt)
+    {
+        // -----------------------------
+        // Cooldowns
+        // -----------------------------
+        foreach (var itemId in
+            itemStealCooldowns.Keys.ToList())
+        {
+            itemStealCooldowns[itemId] -= dt;
+
+            if (itemStealCooldowns[itemId] <= 0)
+            {
+                itemStealCooldowns.Remove(
+                    itemId);
+            }
+        }
+
+        // -----------------------------
+        // Airborne rescued items
+        // -----------------------------
+        for (int i =
+                 returningItems.Count - 1;
+             i >= 0;
+             i--)
+        {
+            var returning =
+                returningItems[i];
+
+            var item =
+                items.FirstOrDefault(
+                    x =>
+                        x.Id ==
+                        returning.ItemId);
+
+            if (item == null)
+            {
+                returningItems.RemoveAt(i);
+                continue;
+            }
+
+            returning.Age += dt;
+
+            // Before the parachute opens,
+            // gravity accelerates the item.
+            if (returning.Age <
+                ParachuteDeployDelay)
+            {
+                returning.Vy +=
+                    240 *
+                    dt /
+                    1000;
+            }
+            else
+            {
+                // Once the parachute opens,
+                // air resistance pulls the fall
+                // speed toward our gentle terminal
+                // velocity.
+                returning.Vy +=
+                    (ParachuteFallSpeed -
+                     returning.Vy) *
+                    Math.Min(
+                        1,
+                        dt / 220);
+            }
+
+            returning.Y +=
+                returning.Vy *
+                dt /
+                1000;
+
+            // -----------------------------
+            // Guide it gently back toward
+            // its original farm position.
+            // -----------------------------
+
+            double totalDistance =
+                Math.Max(
+                    1,
+                    ItemFieldY -
+                    returning.StartY);
+
+            double progress =
+                Math.Clamp(
+                    (returning.Y -
+                     returning.StartY) /
+                    totalDistance,
+                    0,
+                    1);
+
+            // Smoothstep.
+            double eased =
+                progress *
+                progress *
+                (3 - 2 * progress);
+
+            double centerX =
+                returning.StartX +
+                (item.FieldX -
+                 returning.StartX) *
+                eased;
+
+            // Parachute sway becomes smaller
+            // as it approaches the ground.
+            double sway =
+                Math.Sin(
+                    returning.Age /
+                    260 +
+                    returning.SwayOffset) *
+                10 *
+                (1 -
+                 progress * 0.65);
+
+            returning.X =
+                centerX +
+                sway;
+
+            // -----------------------------
+            // Landing
+            // -----------------------------
+            if (returning.Y <
+                ItemFieldY)
+            {
+                continue;
+            }
+
+            returning.Y =
+                ItemFieldY;
+
+            item.Safe = true;
+
+            itemStealCooldowns[
+                item.Id] =
+                ParachuteRecoveryCooldown;
+
+            returningItems.RemoveAt(i);
+
+            Toast(
+                $"{item.Name} landed safely! 🪂");
+        }
+    }
+
+    void UpdateBossEncounter(
+        double dt)
+    {
+        // ---------------------------------
+        // Arrival
+        // ---------------------------------
+        if (bossIntroActive)
+        {
+            bossIntroT -= dt;
+
+            if (bossIntroT <= 0)
+            {
+                // Guarantee a completely clean battlefield.
+                enemies.RemoveAll(
+                    e =>
+                        e.Type !=
+                        EnemyType.Boss);
+
+                ClearBossCombatProjectiles();
+
+                SpawnBoss();
+
+                bossIntroActive = false;
+                bossBattleActive = true;
+            }
+
+            return;
+        }
+
+        // ---------------------------------
+        // Destruction sequence
+        // ---------------------------------
+        if (!bossOutroActive)
+            return;
+
+        bossOutroT -= dt;
+        bossOutroElapsed += dt;
+
+        var boss =
+            ActiveBoss;
+
+        if (boss != null)
+        {
+            // Small violent shake while it blows apart.
+            boss.X +=
+                (rng.NextDouble() - 0.5) *
+                1.8;
+
+            boss.Y +=
+                (rng.NextDouble() - 0.5) *
+                1.2;
+
+            if (bossExplosionStep == 0 &&
+                bossOutroElapsed >= 200)
+            {
+                bossExplosionStep = 1;
+
+                SpawnExplosion(
+                    boss.X - 55,
+                    boss.Y + 10,
+                    ExplosionSize.Medium);
+            }
+
+            if (bossExplosionStep == 1 &&
+                bossOutroElapsed >= 600)
+            {
+                bossExplosionStep = 2;
+
+                SpawnExplosion(
+                    boss.X + 50,
+                    boss.Y - 20,
+                    ExplosionSize.Medium);
+            }
+
+            if (bossExplosionStep == 2 &&
+                bossOutroElapsed >= 1000)
+            {
+                bossExplosionStep = 3;
+
+                SpawnExplosion(
+                    boss.X,
+                    boss.Y + 35,
+                    ExplosionSize.Large);
+            }
+
+            if (bossExplosionStep == 3 &&
+                bossOutroElapsed >= 1450)
+            {
+                bossExplosionStep = 4;
+
+                SpawnExplosion(
+                    boss.X - 30,
+                    boss.Y - 35,
+                    ExplosionSize.Medium);
+
+                SpawnExplosion(
+                    boss.X + 35,
+                    boss.Y + 20,
+                    ExplosionSize.Medium);
+            }
+        }
+
+        if (bossOutroT > 0)
+            return;
+
+        if (boss != null)
+        {
+            SpawnExplosion(
+                boss.X,
+                boss.Y,
+                ExplosionSize.Large);
+
+            if (boss.BossVariant ==
+                BossVariant.Harvester)
+            {
+                ReleaseHarvesterCargo(
+                    boss.X,
+                    boss.Y);
+            }
+
+            enemies.Remove(
+                boss);
+        }
+
+        bossOutroActive = false;
+        bossCombatLocked = false;
+
+        // Completing wave 5 jumps us to wave 6,
+        // completing wave 10 jumps us to 11, etc.
+        waveTime =
+            wave *
+            WaveDurationMs;
+
+        spawnTimer = 3000;
+
+        WaveBanner(
+            "👽 MOTHERSHIP DESTROYED! 👽");
+    }
+
+    void SpawnBoss()
+    {
+        BossVariant variant =
+            activeBossVariant;
 
         int hp =
-            20 +
-            wave * 4;
+            50 +
+            wave * 6;
 
         hp +=
             variant switch
@@ -2688,7 +4289,7 @@
                 X = W / 2,
                 Y = -90,
 
-                Vy = 42,
+                Vy = 105,
 
                 Phase = 0,
 
@@ -2697,6 +4298,9 @@
 
                 Type =
                     EnemyType.Boss,
+
+                State =
+                    EnemyState.Descending,
 
                 BossVariant =
                     variant,
@@ -2713,6 +4317,7 @@
                         _ =>
                             1500
                     },
+                HoverTimer = variant == BossVariant.Harvester ? 900 : 0,
 
                 PatrolY =
                     H * 0.22,
@@ -2848,17 +4453,114 @@
 
     void StealTargetItem(Enemy en)
     {
-        var target = items.FirstOrDefault(i => i.Id == en.TargetItemId && i.Safe);
+        var target =
+        items.FirstOrDefault(
+            i =>
+                i.Id == en.TargetItemId &&
+                CanStealItem(i));
+
         if (target == null)
         {
-            var fallback = items.Where(i => i.Safe).ToList();
-            if (fallback.Count == 0) return;
-            target = fallback[rng.Next(fallback.Count)];
+            var fallback =
+                items
+                    .Where(CanStealItem)
+                    .ToList();
+
+            if (fallback.Count == 0)
+                return;
+
+            target =
+                fallback[
+                    rng.Next(
+                        fallback.Count)];
         }
         target.Safe = false;
         en.StolenItemId = target.Id;
         Toast(StealLines.TryGetValue(target.Id, out var line) ? line : $"They stole {target.Name}!");
-        if (items.All(i => !i.Safe)) EndGame(items: true);
+        
+    }
+
+    void StartItemReturn(
+    FarmItem item,
+    double shipX,
+    double shipY)
+    {
+        returningItems.RemoveAll(
+            r =>
+                r.ItemId ==
+                item.Id);
+
+        // Keep it unavailable while airborne.
+        item.Safe = false;
+
+        double startY =
+            Math.Min(
+                shipY,
+                ItemFieldY - 35);
+
+        returningItems.Add(
+            new ReturningFarmItem
+            {
+                ItemId = item.Id,
+
+                StartX = shipX,
+                StartY = startY,
+
+                X = shipX,
+                Y = startY,
+
+                // It initially drops fairly quickly.
+                Vy = 105,
+
+                Age = 0,
+
+                SwayOffset =
+                    rng.NextDouble() *
+                    Math.PI *
+                    2
+            });
+    }
+
+    void ReleaseHarvesterCargo(
+    double shipX,
+    double shipY)
+    {
+        if (harvesterStolenItemIds.Count == 0)
+            return;
+
+        int index = 0;
+        int count =
+            harvesterStolenItemIds.Count;
+
+        foreach (var itemId in
+                 harvesterStolenItemIds.ToList())
+        {
+            var item =
+                items.FirstOrDefault(
+                    i => i.Id == itemId);
+
+            if (item == null)
+                continue;
+
+            // Spread multiple rescued items around
+            // the mothership so they don't all overlap.
+            double offset =
+                (index -
+                 (count - 1) / 2.0) *
+                24;
+
+            StartItemReturn(
+                item,
+                Math.Clamp(
+                    shipX + offset,
+                    30,
+                    W - 30),
+                shipY);
+
+            index++;
+        }
+
+        harvesterStolenItemIds.Clear();
     }
 
     void Hurt()
@@ -2921,27 +4623,78 @@
 
     void EndGame(bool items)
     {
-        screen = ScreenState.End;
-        loopCts?.Cancel();
-        _ = PlayMusic("music_lose.mp3");
+        // Prevent the same death from being processed
+        // more than once during the final update frame.
+        if (screen == ScreenState.End)
+            return;
+
+        CancelSpeech();
+
+        // Kill transient gameplay UI.
+        toastCts?.Cancel();
+        bannerCts?.Cancel();
+        wobbleRageBannerCts?.Cancel();
+
+        toastMsg = "";
+        waveBannerMsg = "";
+        showWobbleRageBanner = false;
+
+        paused = false;
+
+        // Build the end screen BEFORE switching screens.
         if (items)
         {
-            endTitle = "THE FARM IS GONE 👽";
-            endMsg = "Every last thing got beamed into space — including his wife. Ted is currently filing a very strange police report.";
+            endTitle =
+                "THE FARM IS GONE 👽";
+
+            endMsg =
+                "Every last thing got beamed into space — including his wife. " +
+                "Ted is currently filing a very strange police report.";
         }
         else
         {
-            endTitle = "GAME OVER";
-            int remaining = this.items.Count(i => i.Safe);
-            endMsg = remaining == ItemDefs.Length
-                ? "You went down swinging, but at least the farm's still intact. Barely."
-                : $"You held onto {remaining} of {ItemDefs.Length} things before the aliens got you. Ted appreciates the effort.";
+            endTitle =
+                "GAME OVER";
+
+            int remaining =
+                this.items.Count(
+                    i => i.Safe);
+
+            endMsg =
+                remaining == ItemDefs.Length
+                    ? "You went down swinging, but at least the farm's still intact. Barely."
+                    : $"You held onto {remaining} of {ItemDefs.Length} things before the aliens got you. Ted appreciates the effort.";
         }
 
-        isNewBest = score > Progress.BestScore;
-        if (isNewBest) Progress.BestScore = score;
-        Progress.TotalCoins += coinsThisRun;
+        isNewBest =
+            score > Progress.BestScore;
+
+        if (isNewBest)
+        {
+            Progress.BestScore =
+                score;
+        }
+
+        Progress.TotalCoins +=
+            coinsThisRun;
+
+        // Change state only after everything the
+        // end screen needs has been populated.
+        screen =
+            ScreenState.End;
+
+        loopCts?.Cancel();
+
+        _ = PlayMusic(
+            "music_lose.mp3");
+
         _ = Progress.SaveAsync(JS);
+
+        // Critical:
+        // the game loop has just been cancelled, so
+        // we cannot rely on its next 15 Hz UI update.
+        _ = InvokeAsync(
+            StateHasChanged);
     }
 
     async Task TogglePause()
@@ -3198,6 +4951,8 @@
         loopCts?.Cancel();
         toastCts?.Cancel();
         bannerCts?.Cancel();
+        wobbleRageBannerCts?.Cancel();
+        speechCts?.Cancel();
     }
 
     async ValueTask PushPixiFrameAsync()
@@ -3211,8 +4966,14 @@
             {
                 X = (float)farmerX,
                 Y = (float)farmerY,
+
                 Flame = flameT > 0,
-                Flash = invulnT > 0 && flashOn
+
+                Flash = invulnT > 0 && flashOn,
+
+                Shield = shieldT > 0,
+
+                ShieldTime = (float)Math.Max(0, shieldT)
             },
 
             Wobble = new
@@ -3320,9 +5081,10 @@
                                 en.BeamElapsed /
                                 (
                                     en.Type == EnemyType.Boss &&
-                                    en.BossVariant == BossVariant.Harvester
-                                        ? HarvesterBeamDuration
-                                        : BeamDuration
+                                    en.BossVariant ==
+                                        BossVariant.Harvester
+                                            ? GetHarvesterBeamDuration(en)
+                                            : BeamDuration
                                 ))
                             : 0f
                 })
@@ -3341,6 +5103,25 @@
                     Y = (float)ItemFieldY
                 })
                 .ToArray(),
+
+            ReturningItems = returningItems.Select(r => new
+            {
+                Id = r.ItemId,
+
+                ItemId =
+                    r.ItemId,
+
+                X =
+                    (float)r.X,
+
+                Y =
+                    (float)r.Y,
+
+                ParachuteDeployed =
+                    r.Age >=
+                    ParachuteDeployDelay
+            })
+            .ToArray(),
 
             Powerups = powerups
                 .Select(p => new
