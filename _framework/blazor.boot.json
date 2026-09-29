@@ -1,7 +1,7 @@
 {
   "mainAssemblyName": "AlienFarmHeist",
   "resources": {
-    "hash": "sha256-wDuKnrIlTUX9EIzx+KTf9Zisk8OAH/DjaVY4mXh14n4=",
+    "hash": "sha256-UPqbLkvcrarzgXhaQbd/7ASLwa9AB+i6DgoBCKXuUL4=",
     "jsModuleNative": {
       "dotnet.native.8.0.31.3ug9ydofr5.js": "sha256-SPttQW1Mut6R2p7MYTnfR5KuC/a9CqqKrw8CooTbqpU="
     },
@@ -9,7 +9,7 @@
       "dotnet.runtime.8.0.31.yqliaixnm0.js": "sha256-qzVt86q0GKgDNek5+WFBz2hU8jGxI86YJeZmNGXj/qM="
     },
     "wasmNative": {
-      "dotnet.native.wasm": "sha256-4st0jaxfR3HTcf4Xs1D1mDYxYsSr3OqsOJzKU4zYLwM="
+      "dotnet.native.wasm": "sha256-Wc/5ai04MpYHd3gtYHwtHPFrAJooKlAqyTV1U/ZZ7TY="
     },
     "icu": {
       "icudt_CJK.dat": "sha256-SZLtQnRc0JkwqHab0VUVP7T3uBPSeYzxzDnpxPpUnHk=",
@@ -17,7 +17,7 @@
       "icudt_no_CJK.dat": "sha256-L7sV7NEYP37/Qr2FPCePo5cJqRgTXRwGHuwF5Q+0Nfs="
     },
     "assembly": {
-      "AlienFarmHeist.wasm": "sha256-p4g6Z0CIY6rH1oBjyeECRCRJ4UmkGlWPvZmnN+lcjNo=",
+      "AlienFarmHeist.wasm": "sha256-pXy0KvpgIi88VRX7kBtqSpLiTA17vlIY/+0CZPBUYoc=",
       "Microsoft.AspNetCore.Components.wasm": "sha256-ybY9cDNIEE78ZK0R/fsTVAMq3hQpqwb1lfrCKn+SoGM=",
       "Microsoft.AspNetCore.Components.Web.wasm": "sha256-kRnrONiWvMMFGRvvRb3N8ebBgJibiCP0o1fEABvLnHg=",
       "Microsoft.AspNetCore.Components.WebAssembly.wasm": "sha256-LdAy6nNgakNLR1G1UW0m1t/i4G5ASffvuPT/PUnY+Ho=",
