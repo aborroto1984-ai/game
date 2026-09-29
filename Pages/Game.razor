@@ -2,11 +2,14 @@
 @using AlienFarmHeist.Models
 @using System.Globalization
 @using System.Diagnostics
+@using AlienFarmHeist.Services
+@inject PlayerApiService PlayerApi
 @inject IJSRuntime JS
 @implements IDisposable
 
 <div class="stage" tabindex="0" @ref="stageRef"
-     @onkeydown="OnKeyDown" @onkeydown:preventDefault
+     @onkeydown="OnKeyDown"
+     @onkeydown:preventDefault="screen == ScreenState.Playing"
      @onkeyup="OnKeyUp">
 
     @if (loading)
@@ -164,14 +167,136 @@
         <div class="side" @onpointerdown="() => SetKey(false, true)" @onpointerup="() => SetKey(false, false)" @onpointerleave="() => SetKey(false, false)"></div>
     </div>
 
-    @if (!loading && screen == ScreenState.Start)
+    @if (!loading && needsPlayerSetup)
     {
         <div class="overlay start-overlay">
+
+            @if (!string.IsNullOrWhiteSpace(generatedRecoveryCode))
+            {
+                <h1>SAVE YOUR RECOVERY CODE</h1>
+
+                <div class="sub">
+                    This code lets you recover your player
+                    if you change devices or clear browser data.
+                </div>
+
+                <input value="@generatedRecoveryCode"
+                       readonly />
+
+                <button class="shop-link"
+                        @onclick="CopyRecoveryCodeAsync">
+                    📋 Copy Recovery Code
+                </button>
+
+                <div class="sub">
+                    Save it somewhere safe.
+                    It will not be shown again.
+                </div>
+
+                <button class="play"
+                        @onclick="ConfirmRecoveryCodeSaved">
+                    I've Saved It
+                </button>
+            }
+            else if (recoveringPlayer)
+            {
+                <h1>RECOVER YOUR FARMER</h1>
+
+                <div class="sub">
+                    Enter your player name and recovery code.
+                </div>
+
+                <input @bind="playerNameInput"
+                       @bind:event="oninput"
+                       maxlength="20"
+                       placeholder="Player name" />
+
+                <input @bind="recoveryCodeInput"
+                       @bind:event="oninput"
+                       maxlength="14"
+                       placeholder="Recovery code" />
+
+                @if (!string.IsNullOrWhiteSpace(playerSetupError))
+                {
+                    <div class="sub">
+                        @playerSetupError
+                    </div>
+                }
+
+        <button class="play"
+                disabled="@creatingPlayer"
+                @onclick="RecoverPlayerAsync">
+            @(creatingPlayer
+                        ? "Recovering..."
+                        : "Recover Player")
+        </button>
+
+                <button class="shop-link"
+                        disabled="@creatingPlayer"
+                        @onclick="ShowCreatePlayer">
+                    Back
+                </button>
+                }
+            else
+            {
+                <h1>WHO'S DEFENDING THE FARM?</h1>
+
+                <div class="sub">
+                    Choose a player name for your saved progress
+                    and leaderboard scores.
+                </div>
+
+                <input @bind="playerNameInput"
+                       @bind:event="oninput"
+                       maxlength="20"
+                       placeholder="Player name" />
+
+                @if (!string.IsNullOrWhiteSpace(playerSetupError))
+                {
+                    <div class="sub">
+                        @playerSetupError
+                    </div>
+                }
+
+        <button class="play"
+                disabled="@creatingPlayer"
+                @onclick="CreatePlayerAsync">
+            @(creatingPlayer
+                        ? "Creating..."
+                        : "Create Player")
+        </button>
+
+                <button class="shop-link"
+                        disabled="@creatingPlayer"
+                        @onclick="ShowRecoverPlayer">
+                    Recover Existing Player
+                </button>
+                }
+
+        </div>
+    }
+    else if (!loading &&
+    screen == ScreenState.Start)
+    {
+        <div class="overlay start-overlay">
+
             <div class="progress-strip">
                 <span>🪙 @Progress.TotalCoins</span>
                 <span>⭐ Best: @Progress.BestScore</span>
             </div>
-            <button class="help-toggle" @onclick="() => showHelp = !showHelp">❓ How to Play</button>
+
+            @if (!string.IsNullOrWhiteSpace(currentPlayerName))
+            {
+                <div class="sub">
+                    Playing as <b>@currentPlayerName</b>
+                </div>
+            }
+
+            <button class="help-toggle"
+                    @onclick="() => showHelp = !showHelp">
+                ❓ How to Play
+            </button>
+
             @if (showHelp)
             {
                 <div class="controls-hint">
@@ -180,8 +305,118 @@
                     👑 Mothership every 5th wave &nbsp; 🔥 grab the flamethrower when you see it
                 </div>
             }
-            <button class="play" @onclick="StartGame">Save the Farm</button>
-            <button class="shop-link" @onclick="GoToShop">🛒 Upgrade Shop</button>
+
+        <button class="play"
+                @onclick="StartGame">
+            Save the Farm
+        </button>
+
+        <button class="shop-link"
+                @onclick="GoToShop">
+            🛒 Upgrade Shop
+        </button>
+
+        <button class="shop-link"
+                @onclick="OpenLeaderboardAsync">
+            🏆 Leaderboard
+        </button>
+
+        <button class="shop-link"
+                disabled="@generatingRecoveryCode"
+                @onclick="GenerateRecoveryCodeAsync">
+            @(generatingRecoveryCode
+                        ? "Generating..."
+                        : "🔑 Generate New Recovery Code")
+        </button>
+
+        @if (!string.IsNullOrWhiteSpace(generatedRecoveryCode))
+            {
+                <div class="sub">
+                    New recovery code:
+                </div>
+
+                <input value="@generatedRecoveryCode"
+                       readonly />
+
+                <button class="shop-link"
+                        @onclick="CopyRecoveryCodeAsync">
+                    📋 Copy Recovery Code
+                </button>
+
+                <div class="sub">
+                    Save this code somewhere safe.
+                    Your previous recovery code is no longer valid.
+                </div>
+
+                <button class="shop-link"
+                        @onclick="DismissRecoveryCode">
+                    I've Saved It
+                </button>
+            }
+
+        </div>
+    }
+    else if (screen == ScreenState.Leaderboard)
+    {
+        <div class="overlay shop-overlay">
+
+            <h1>🏆 LEADERBOARD</h1>
+
+            @if (leaderboardLoading)
+            {
+                <div class="sub">
+                    Loading scores...
+                </div>
+            }
+            else if (!string.IsNullOrWhiteSpace(
+            leaderboardError))
+            {
+                <div class="sub">
+                    @leaderboardError
+                </div>
+            }
+            else if (leaderboard.Count == 0)
+            {
+                <div class="sub">
+                    No scores yet.
+                </div>
+            }
+            else
+            {
+                <div class="shop-list">
+
+                    @foreach (var entry in leaderboard)
+                    {
+                        <div class="shop-row">
+
+                            <div class="shop-info">
+
+                                <div class="shop-name">
+                                    #@entry.Rank
+                                    @entry.PlayerName
+                                </div>
+
+                                <div class="shop-desc">
+                                    Wave @entry.Wave
+                                </div>
+
+                            </div>
+
+                            <div class="shop-level">
+                                ⭐ @entry.Score
+                            </div>
+
+                        </div>
+                    }
+
+                </div>
+            }
+
+            <button class="play"
+                    @onclick="BackToStart">
+                Back
+            </button>
+
         </div>
     }
     else if (screen == ScreenState.Shop)
@@ -545,8 +780,29 @@
     const double ParachuteFallSpeed = 72;
     const double ParachuteRecoveryCooldown = 4000;
 
+    PlayerSession? playerSession;
+
+    bool needsPlayerSetup;
+    bool creatingPlayer;
+
+    string playerNameInput = "";
+    string playerSetupError = "";
+
+    bool recoveringPlayer;
+    bool generatingRecoveryCode;
+
+    string recoveryCodeInput = "";
+    string generatedRecoveryCode = "";
+    string currentPlayerName = "";
+
+    List<LeaderboardEntryDto> leaderboard = new();
+
+    bool leaderboardLoading;
+    string leaderboardError = "";
+
     GameProgress Progress = new();
     int wave = 1, lastWaveTriggered = 1, coinsThisRun = 0;
+    bool runSubmitted;
     int killsSincePowerup;
     bool isNewBest = false;
     const double WaveDurationMs = 25000;
@@ -676,9 +932,43 @@
         decor.Add(new() { Image = "images/pumpkin_plant.png", X = pumpkinX - 19, Y = ItemFieldY - 82, W = 44, H = 42 });
         decor.Add(new() { Image = "images/pumpkin_plant.png", X = pumpkinX + 19, Y = ItemFieldY - 76, W = 40, H = 38 });
 
-        Progress = await GameProgress.LoadAsync(JS);
-        _ = PlayMusic("music_intro.mp3");
-    }
+        Progress =
+            await GameProgress.LoadAsync(JS);
+
+                try
+                {
+                    playerSession =
+                        await PlayerApi
+                            .GetSessionAsync();
+
+                    if (playerSession != null)
+                    {
+                var serverPlayer =
+                    await PlayerApi
+                    .GetPlayerAsync(
+                        playerSession);
+
+                currentPlayerName =
+                    serverPlayer.PlayerName;
+
+                Progress.ApplyServerProfile(
+                    serverPlayer);
+
+                        await Progress.SaveAsync(JS);
+                    }
+                    else
+                    {
+                        needsPlayerSetup =
+                            true;
+                    }
+                }
+                catch
+                {
+                    // Keep cached local progress if
+                    // Cloudflare is temporarily unavailable.
+                }
+                _ = PlayMusic("music_intro.mp3");
+            }
 
     protected override Task OnAfterRenderAsync(bool firstRender)
     {
@@ -1213,8 +1503,17 @@
 
     void OnKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key is "ArrowLeft" or "a" or "A") keyLeft = true;
-        if (e.Key is "ArrowRight" or "d" or "D") keyRight = true;
+        if (screen != ScreenState.Playing ||
+            paused)
+        {
+            return;
+        }
+
+        if (e.Key is "ArrowLeft" or "a" or "A")
+            keyLeft = true;
+
+        if (e.Key is "ArrowRight" or "d" or "D")
+            keyRight = true;
     }
 
     void OnKeyUp(KeyboardEventArgs e)
@@ -1335,6 +1634,7 @@
         wave = 1;
         lastWaveTriggered = 1;
         coinsThisRun = 0;
+        runSubmitted = false;
         killsSincePowerup = 0;
         isNewBest = false;
 
@@ -4623,25 +4923,34 @@
     double shipX,
     double shipY)
     {
-        if (harvesterStolenItemIds.Count == 0)
+        var lostItems =
+            items
+                .Where(item =>
+                    !item.Safe &&
+                    !returningItems.Any(
+                        returning =>
+                            returning.ItemId ==
+                            item.Id))
+                .ToList();
+
+        if (lostItems.Count == 0)
+        {
+            harvesterStolenItemIds.Clear();
             return;
+        }
 
-        int index = 0;
         int count =
-            harvesterStolenItemIds.Count;
+            lostItems.Count;
 
-        foreach (var itemId in
-                 harvesterStolenItemIds.ToList())
+        for (int index = 0;
+             index < count;
+             index++)
         {
             var item =
-                items.FirstOrDefault(
-                    i => i.Id == itemId);
+                lostItems[index];
 
-            if (item == null)
-                continue;
-
-            // Spread multiple rescued items around
-            // the mothership so they don't all overlap.
+            // Spread everything across the wreckage
+            // so the parachutes don't overlap.
             double offset =
                 (index -
                  (count - 1) / 2.0) *
@@ -4654,11 +4963,14 @@
                     30,
                     W - 30),
                 shipY);
-
-            index++;
         }
 
         harvesterStolenItemIds.Clear();
+
+        Toast(
+            count == 1
+                ? "The Harvester had one of our things! It's coming home! 🪂"
+                : $"JACKPOT! The Harvester had {count} of our things! They're all coming home! 🪂");
     }
 
     void Hurt()
@@ -4764,17 +5076,7 @@
                     : $"You held onto {remaining} of {ItemDefs.Length} things before the aliens got you. Ted appreciates the effort.";
         }
 
-        isNewBest =
-            score > Progress.BestScore;
-
-        if (isNewBest)
-        {
-            Progress.BestScore =
-                score;
-        }
-
-        Progress.TotalCoins +=
-            coinsThisRun;
+        isNewBest = score > Progress.BestScore;
 
         // Change state only after everything the
         // end screen needs has been populated.
@@ -4786,7 +5088,7 @@
         _ = PlayMusic(
             "music_lose.mp3");
 
-        _ = Progress.SaveAsync(JS);
+        _ = SubmitCurrentRunAsync();
 
         // Critical:
         // the game loop has just been cancelled, so
@@ -5014,17 +5316,53 @@
     async Task QuitToMenu()
     {
         loopCts?.Cancel();
+
         paused = false;
-        Progress.TotalCoins += coinsThisRun;
-        await Progress.SaveAsync(JS);
-        screen = ScreenState.Start;
-        await PlayMusic("music_intro.mp3");
+
+        await SubmitCurrentRunAsync();
+
+        screen =
+            ScreenState.Start;
+
+        await PlayMusic(
+            "music_intro.mp3");
     }
 
     async Task GoToShop()
     {
         screen = ScreenState.Shop;
         await PlayMusic("music_shop.mp3");
+    }
+
+    async Task OpenLeaderboardAsync()
+    {
+        screen =
+            ScreenState.Leaderboard;
+
+        leaderboardLoading =
+            true;
+
+        leaderboardError =
+            "";
+
+        leaderboard.Clear();
+
+        try
+        {
+            leaderboard =
+                await PlayerApi
+                    .GetLeaderboardAsync();
+        }
+        catch (Exception ex)
+        {
+            leaderboardError =
+                ex.Message;
+        }
+        finally
+        {
+            leaderboardLoading =
+                false;
+        }
     }
 
     async Task BackToStart()
@@ -5035,13 +5373,47 @@
 
     async Task BuyUpgrade(string key)
     {
-        int level = Progress.LevelFor(key);
-        if (level >= GameProgress.MaxLevel) return;
-        int cost = GameProgress.CostFor(key, level);
-        if (Progress.TotalCoins < cost) return;
-        Progress.TotalCoins -= cost;
-        Progress.SetLevel(key, level + 1);
-        await Progress.SaveAsync(JS);
+        if (playerSession == null)
+            return;
+
+        int level =
+            Progress.LevelFor(key);
+
+        if (level >=
+            GameProgress.MaxLevel)
+        {
+            return;
+        }
+
+        int cost =
+            GameProgress.CostFor(
+                key,
+                level);
+
+        if (Progress.TotalCoins < cost)
+            return;
+
+        try
+        {
+            var serverPlayer =
+                await PlayerApi
+                    .PurchaseUpgradeAsync(
+                        playerSession,
+                        key);
+
+            Progress.ApplyServerProfile(
+                serverPlayer);
+
+            await Progress.SaveAsync(JS);
+
+            await InvokeAsync(
+                StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Toast(
+                ex.Message);
+        }
     }
 
     public void Dispose()
@@ -5296,5 +5668,234 @@
             EnemyType.Interceptor => 32,
             _ => 36
         };
+    }
+
+    async Task CreatePlayerAsync()
+    {
+        string name =
+            playerNameInput.Trim();
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            playerSetupError =
+                "Enter a player name.";
+
+            return;
+        }
+
+        creatingPlayer = true;
+        playerSetupError = "";
+
+        try
+        {
+            var result =
+                await PlayerApi
+                    .CreatePlayerAsync(
+                        name);
+
+            playerSession =
+                result.Session;
+
+            currentPlayerName =
+                result.Player.PlayerName;
+
+            Progress.ApplyServerProfile(
+                result.Player);
+
+            await Progress.SaveAsync(JS);
+
+            generatedRecoveryCode =
+                result.RecoveryCode;
+
+            // Keep setup open until the player
+            // confirms they saved the recovery code.
+            needsPlayerSetup =
+                true;
+        }
+        catch (Exception ex)
+        {
+            playerSetupError =
+                ex.Message;
+        }
+        finally
+        {
+            creatingPlayer = false;
+        }
+    }
+
+    void ShowRecoverPlayer()
+    {
+        recoveringPlayer = true;
+
+        playerSetupError = "";
+        recoveryCodeInput = "";
+    }
+
+    void ShowCreatePlayer()
+    {
+        recoveringPlayer = false;
+
+        playerSetupError = "";
+        recoveryCodeInput = "";
+    }
+
+    async Task RecoverPlayerAsync()
+    {
+        string name =
+            playerNameInput.Trim();
+
+        string recoveryCode =
+            recoveryCodeInput.Trim();
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            playerSetupError =
+                "Enter your player name.";
+
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(
+            recoveryCode))
+        {
+            playerSetupError =
+                "Enter your recovery code.";
+
+            return;
+        }
+
+        creatingPlayer = true;
+        playerSetupError = "";
+
+        try
+        {
+            var result =
+                await PlayerApi
+                    .RecoverPlayerAsync(
+                        name,
+                        recoveryCode);
+
+            playerSession =
+                result.Session;
+
+            currentPlayerName =
+                result.Player.PlayerName;
+
+            Progress.ApplyServerProfile(
+                result.Player);
+
+            await Progress.SaveAsync(JS);
+
+            recoveryCodeInput = "";
+            recoveringPlayer = false;
+            needsPlayerSetup = false;
+        }
+        catch (Exception ex)
+        {
+            playerSetupError =
+                ex.Message;
+        }
+        finally
+        {
+            creatingPlayer = false;
+        }
+    }
+
+    void ConfirmRecoveryCodeSaved()
+    {
+        generatedRecoveryCode = "";
+        needsPlayerSetup = false;
+    }
+
+    async Task SubmitCurrentRunAsync()
+    {
+        if (runSubmitted ||
+            playerSession == null)
+        {
+            return;
+        }
+
+        runSubmitted = true;
+
+        try
+        {
+            var serverPlayer =
+                await PlayerApi
+                    .SubmitRunAsync(
+                        playerSession,
+                        score,
+                        wave,
+                        coinsThisRun);
+
+            currentPlayerName =
+                serverPlayer.PlayerName;
+
+            Progress.ApplyServerProfile(
+                serverPlayer);
+
+            await Progress.SaveAsync(JS);
+
+            await InvokeAsync(
+                StateHasChanged);
+        }
+        catch
+        {
+            // Allow retry if the request failed.
+            runSubmitted = false;
+        }
+    }
+
+    async Task GenerateRecoveryCodeAsync()
+    {
+        if (playerSession == null)
+            return;
+
+        generatingRecoveryCode = true;
+        generatedRecoveryCode = "";
+
+        try
+        {
+            generatedRecoveryCode =
+                await PlayerApi
+                    .CreateRecoveryCodeAsync(
+                        playerSession);
+        }
+        catch (Exception ex)
+        {
+            Toast(ex.Message);
+        }
+        finally
+        {
+            generatingRecoveryCode = false;
+        }
+    }
+
+    void DismissRecoveryCode()
+    {
+        generatedRecoveryCode = "";
+    }
+
+    async Task CopyRecoveryCodeAsync()
+    {
+        if (string.IsNullOrWhiteSpace(
+            generatedRecoveryCode))
+        {
+            return;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "navigator.clipboard.writeText",
+                generatedRecoveryCode);
+
+            Toast(
+                "Recovery code copied.");
+        }
+        catch
+        {
+            Toast(
+                "Could not copy recovery code.");
+        }
     }
 }

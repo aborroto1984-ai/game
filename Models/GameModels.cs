@@ -22,8 +22,9 @@ public enum EnemyState
 public enum ScreenState
 {
     Start,
-    Shop,
     Playing,
+    Shop,
+    Leaderboard,
     End
 }
 

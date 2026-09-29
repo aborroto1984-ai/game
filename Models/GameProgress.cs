@@ -12,6 +12,7 @@ public class GameProgress
 {
     public int TotalCoins { get; set; }
     public int BestScore { get; set; }
+    public int BestWave { get; set; }
     public int LifeLevel { get; set; }
     public int FireRateLevel { get; set; }
     public int SpeedLevel { get; set; }
@@ -19,6 +20,31 @@ public class GameProgress
 
     public const int MaxLevel = 5;
     const string StorageKey = "alienFarmHeist.progress.v1";
+
+    public void ApplyServerProfile(
+    PlayerProfileDto player)
+    {
+        TotalCoins =
+            player.TotalCoins;
+
+        BestScore =
+            player.BestScore;
+
+        BestWave =
+            player.BestWave;
+
+        LifeLevel =
+            player.LifeLevel;
+
+        FireRateLevel =
+            player.FireRateLevel;
+
+        SpeedLevel =
+            player.SpeedLevel;
+
+        PowerupLevel =
+            player.PowerupLevel;
+    }
 
     public static readonly (string Key, string Label, string Description, int BaseCost)[] Upgrades = new[]
     {
