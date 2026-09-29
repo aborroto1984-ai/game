@@ -514,6 +514,7 @@
 
     double fireTimer, fireRate = 300;
     double flameSfxTimer;
+    double bulletSfxTimer;
     double spawnTimer, spawnInterval = 1900;
     double moveSpeed = 0.42;
 
@@ -1291,9 +1292,11 @@
 
         fireTimer = 0;
         flameSfxTimer = 0;
+        bulletSfxTimer = 0;
+
         fireRate = Math.Max(
-            210,
-            300 - Progress.FireRateLevel * 18);
+            150,
+            300 - Progress.FireRateLevel * 30);
 
         moveSpeed =
             0.42 +
@@ -1605,6 +1608,11 @@
 
         fireTimer -= dt;
 
+        if (bulletSfxTimer > 0)
+        {
+            bulletSfxTimer -= dt;
+        }
+
         if (!bossCombatLocked)
         {
             if (flameT > 0)
@@ -1612,43 +1620,131 @@
                 if (fireTimer <= 0)
                 {
                     fireTimer = 55;
+
                     if (bullets.Count < MaxPlayerBullets)
                     {
-                        double fy = farmerY - 38;
+                        double fy =
+                            farmerY - 38;
+
                         for (int s = 0; s < 2; s++)
                         {
-                            double spread = (rng.NextDouble() - 0.5) * 0.32;
-                            bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = spread, Vy = -0.44 - rng.NextDouble() * 0.08, IsFlame = true });
+                            double spread =
+                                (rng.NextDouble() - 0.5) *
+                                0.32;
+
+                            bullets.Add(
+                                new Bullet
+                                {
+                                    X = farmerX,
+                                    Y = fy,
+                                    Vx = spread,
+                                    Vy =
+                                        -0.44 -
+                                        rng.NextDouble() *
+                                        0.08,
+                                    IsFlame = true
+                                });
                         }
                     }
+
                     flameSfxTimer -= 55;
+
                     if (flameSfxTimer <= 0)
                     {
                         flameSfxTimer = 180;
-                        _ = PlaySfx("sfx_bullet.mp3", 0.22);
+
+                        _ = PlaySfx(
+                            "sfx_bullet.mp3",
+                            0.22);
                     }
                 }
             }
             else
             {
-                double rate = rapidT > 0 ? fireRate * 0.45 : fireRate;
+                double rate =
+                    rapidT > 0
+                        ? fireRate * 0.45
+                        : fireRate;
+
                 if (fireTimer <= 0)
                 {
-                    fireTimer = rate;
-                    if (bullets.Count < MaxPlayerBullets)
+                    fireTimer =
+                        rate;
+
+                    bool shotFired =
+                        false;
+
+                    double fy =
+                        farmerY - 38;
+
+                    if (wideT > 0)
                     {
-                        double fy = farmerY - 38;
-                        if (wideT > 0)
+                        // Wide shot needs room for all 3 bullets.
+                        if (bullets.Count <=
+                            MaxPlayerBullets - 3)
                         {
-                            bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0, Vy = -0.42 });
-                            bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = -0.14, Vy = -0.4 });
-                            bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0.14, Vy = -0.4 });
+                            bullets.Add(
+                                new Bullet
+                                {
+                                    X = farmerX,
+                                    Y = fy,
+                                    Vx = 0,
+                                    Vy = -0.42
+                                });
+
+                            bullets.Add(
+                                new Bullet
+                                {
+                                    X = farmerX,
+                                    Y = fy,
+                                    Vx = -0.14,
+                                    Vy = -0.4
+                                });
+
+                            bullets.Add(
+                                new Bullet
+                                {
+                                    X = farmerX,
+                                    Y = fy,
+                                    Vx = 0.14,
+                                    Vy = -0.4
+                                });
+
+                            shotFired =
+                                true;
                         }
-                        else
-                        {
-                            bullets.Add(new Bullet { X = farmerX, Y = fy, Vx = 0, Vy = -0.46 });
-                        }
-                        _ = PlaySfx("sfx_bullet.mp3", 0.35);
+                    }
+                    else if (bullets.Count <
+                             MaxPlayerBullets)
+                    {
+                        bullets.Add(
+                            new Bullet
+                            {
+                                X = farmerX,
+                                Y = fy,
+                                Vx = 0,
+                                Vy = -0.46
+                            });
+
+                        shotFired =
+                            true;
+                    }
+
+                    // The gun can physically fire much faster
+                    // than the audio needs to play.
+                    if (shotFired &&
+                        bulletSfxTimer <= 0)
+                    {
+                        bulletSfxTimer =
+                            rapidT > 0
+                                ? 95
+                                : 120;
+
+                        _ = PlaySfx(
+                            "sfx_bullet.mp3",
+                            rapidT > 0
+                                ? 0.28
+                                : 0.35);
                     }
                 }
             }
@@ -4334,15 +4430,17 @@
 
         // Starts restrained but increases as the
         // game becomes more dangerous.
-        double chance =
+        double baseChance =
             0.12 +
-            (wave - 1) * 0.025 +
-            Progress.PowerupLevel * 0.03;
+            (wave - 1) * 0.02;
 
-        chance =
+        double upgradeBonus =
+            Progress.PowerupLevel * 0.035;
+
+        double chance =
             Math.Min(
-                chance,
-                0.38);
+                baseChance + upgradeBonus,
+                0.55);
 
         // Prevent extremely unlucky dry streaks.
         bool guaranteedDrop =
@@ -4581,7 +4679,7 @@
             case "rapid": rapidT = 6000; break;
             case "wide": wideT = 7000; break;
             case "shield": shieldT = 5000; break;
-            case "life": lives = Math.Min(lives + 1, 5); break;
+            case "life": lives = Math.Min(lives + 1, 5 + Progress.LifeLevel); break;
             case "flame": flameT = 6500; break;
         }
         Toast($"{p.Icon} {p.Label}!");
