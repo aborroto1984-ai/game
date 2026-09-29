@@ -413,6 +413,8 @@ window.alienFarmPixi = (function () {
     let farmer = null;
     let wobble = null;
 
+    let farmerShield = null;
+
     // Latest player pointer position stays entirely
     // on the JavaScript side until the next existing
     // Pixi sync call.
@@ -429,6 +431,8 @@ window.alienFarmPixi = (function () {
     const enemyBullets = new Map();
     const enemies = new Map();
     const farmItems = new Map();
+    const returningFarmItems = new Map();
+
     const coinMap = new Map();
     const powerupMap = new Map();
     const explosionMap = new Map();
@@ -640,6 +644,8 @@ window.alienFarmPixi = (function () {
 
             beamColumn: texture(assets.beamColumn),
 
+            parachute: texture(assets.parachute),
+
             exSmall: texture("images/fx_small_explosion.png"),
             exMedium: texture("images/fx_medium_explosion.png"),
             exLarge: texture("images/fx_large_explosion.png"),
@@ -660,11 +666,64 @@ window.alienFarmPixi = (function () {
     }
 
     function createFarmer() {
-        farmer = new PIXI.Sprite(textures.farmer);
+        // ---------------------------------
+        // Shield force field
+        // ---------------------------------
+        farmerShield =
+            new PIXI.Graphics();
+
+        farmerShield
+            .ellipse(
+                0,
+                0,
+                40,
+                67
+            )
+            .fill({
+                color: 0x57cfff,
+                alpha: 0.12
+            })
+            .stroke({
+                color: 0xa9efff,
+                width: 3,
+                alpha: 0.90
+            });
+
+        farmerShield
+            .ellipse(
+                0,
+                0,
+                35,
+                61
+            )
+            .stroke({
+                color: 0xffffff,
+                width: 1,
+                alpha: 0.35
+            });
+
+        farmerShield.visible =
+            false;
+
+        // Behind Ted and Wobble.
+        playerLayer.addChildAt(
+            farmerShield,
+            0);
+
+        // ---------------------------------
+        // Ted
+        // ---------------------------------
+        farmer =
+            new PIXI.Sprite(
+                textures.farmer);
+
         farmer.anchor.set(0.5);
-        farmer.width = 51;   // 34 * 1.5
-        farmer.height = 114; // 76 * 1.5
-        playerLayer.addChild(farmer);
+
+        farmer.width = 51;
+        farmer.height = 114;
+
+        playerLayer.addChild(
+            farmer);
     }
 
     function createWobble() {
@@ -1343,6 +1402,162 @@ window.alienFarmPixi = (function () {
         }
     }
 
+    function createReturningFarmItem(data) {
+        const root =
+            new PIXI.Container();
+
+        const itemTexture =
+            textures.items
+                ? textures.items[data.itemId]
+                : null;
+
+        if (!itemTexture) {
+            return null;
+        }
+
+        // -----------------------------
+        // Farm item
+        // -----------------------------
+        const item =
+            new PIXI.Sprite(itemTexture);
+
+        item.anchor.set(0.5);
+
+        const targetWidth =
+            itemBaseWidths[data.itemId] || 36;
+
+        const itemRatio =
+            itemTexture.width > 0
+                ? itemTexture.height /
+                itemTexture.width
+                : 1;
+
+        item.width =
+            targetWidth;
+
+        item.height =
+            targetWidth *
+            itemRatio;
+
+        root.addChild(item);
+
+        // -----------------------------
+        // Parachute
+        // -----------------------------
+        const parachute =
+            new PIXI.Sprite(
+                textures.parachute);
+
+        parachute.anchor.set(
+            0.5,
+            1);
+
+        const parachuteWidth = 62;
+
+        const parachuteRatio =
+            textures.parachute.width > 0
+                ? textures.parachute.height /
+                textures.parachute.width
+                : 1;
+
+        parachute.width =
+            parachuteWidth;
+
+        parachute.height =
+            parachuteWidth *
+            parachuteRatio;
+
+        // Put the harness just above the item.
+        parachute.position.set(
+            0,
+            -(item.height / 2) + 5);
+
+        parachute.visible =
+            data.parachuteDeployed;
+
+        root.addChild(
+            parachute);
+
+        itemLayer.addChild(
+            root);
+
+        return {
+            root,
+            item,
+            parachute
+        };
+    }
+
+    function syncReturningItems(list) {
+        if (!list ||
+            !Array.isArray(list)) {
+            return;
+        }
+
+        const seen =
+            new Set();
+
+        for (let i = 0;
+            i < list.length;
+            i++) {
+
+            const data =
+                list[i];
+
+            if (!data ||
+                !data.id) {
+                continue;
+            }
+
+            const id =
+                String(data.id);
+
+            seen.add(id);
+
+            let node =
+                returningFarmItems.get(id);
+
+            if (!node) {
+                node =
+                    createReturningFarmItem(
+                        data);
+
+                if (!node) {
+                    continue;
+                }
+
+                returningFarmItems.set(
+                    id,
+                    node);
+            }
+
+            node.root.position.set(
+                data.x,
+                data.y);
+
+            node.parachute.visible =
+                !!data.parachuteDeployed;
+        }
+
+        for (const [id, node]
+            of returningFarmItems) {
+
+            if (seen.has(id)) {
+                continue;
+            }
+
+            itemLayer.removeChild(
+                node.root);
+
+            node.root.destroy({
+                children: true
+            });
+
+            returningFarmItems.delete(
+                id);
+        }
+    }
+
     function syncCoinsFlat(list) {
         if (!list) return;
         const seen = new Set();
@@ -1713,10 +1928,56 @@ window.alienFarmPixi = (function () {
         if (frame.farmer) {
             farmer.visible = true;
 
+            // Move Ted
             farmer.position.set(
                 frame.farmer.x,
                 frame.farmer.y
             );
+
+            // Keep the shield centered on Ted
+            farmerShield.position.set(
+                frame.farmer.x,
+                frame.farmer.y
+            );
+
+            if (frame.farmer.shield) {
+                const now =
+                    performance.now();
+
+                const pulse =
+                    (Math.sin(
+                        now / 120
+                    ) + 1) / 2;
+
+                const scale =
+                    0.98 +
+                    pulse * 0.05;
+
+                farmerShield.scale.set(
+                    scale);
+
+                farmerShield.alpha =
+                    0.72 +
+                    pulse * 0.28;
+
+                // During the final second,
+                // flicker to warn the player
+                // that the shield is expiring.
+                if (frame.farmer.shieldTime <= 1000) {
+                    farmerShield.visible =
+                        Math.floor(
+                            now / 100
+                        ) % 2 === 0;
+                }
+                else {
+                    farmerShield.visible =
+                        true;
+                }
+            }
+            else {
+                farmerShield.visible =
+                    false;
+            }
 
             farmer.texture =
                 frame.farmer.flame
@@ -1766,6 +2027,7 @@ window.alienFarmPixi = (function () {
 
         syncEnemies(frame.enemies);
         syncItems(frame.items);
+        syncReturningItems(frame.returningItems);
         syncCoinsFlat(frame.coins);
         syncPowerups(frame.powerups);
         syncExplosionsFlat(frame.explosions);
@@ -1866,6 +2128,25 @@ window.alienFarmPixi = (function () {
         if (wobble) {
             wobble.visible = false;
         }
+
+        if (farmerShield) {
+            farmerShield.visible =
+                false;
+        }
+
+        // -----------------------------
+        // Returning farm items
+        // -----------------------------
+        returningFarmItems.forEach(node => {
+            itemLayer.removeChild(
+                node.root);
+
+            node.root.destroy({
+                children: true
+            });
+        });
+
+        returningFarmItems.clear();
     }
 
     return {
