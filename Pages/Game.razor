@@ -5838,10 +5838,17 @@
             await InvokeAsync(
                 StateHasChanged);
         }
-        catch
+        catch (Exception ex)
         {
-            // Allow retry if the request failed.
             runSubmitted = false;
+
+            Console.Error.WriteLine(
+                $"Run submission failed. " +
+                $"Score={score}, Wave={wave}, Coins={coinsThisRun}. " +
+                $"{ex}");
+
+            Toast(
+                $"Score submission failed: {ex.Message}");
         }
     }
 
